@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"/absolute/path/to/codex-context-mode/cli.bundle.mjs\" hook codex pretooluse"
+            "command": "node \"/absolute/path/to/codex-context-mode/hooks/codex/pretooluse.mjs\""
           }
         ]
       }
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"/absolute/path/to/codex-context-mode/cli.bundle.mjs\" hook codex posttooluse"
+            "command": "node \"/absolute/path/to/codex-context-mode/hooks/codex/posttooluse.mjs\""
           }
         ]
       }
@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"/absolute/path/to/codex-context-mode/cli.bundle.mjs\" hook codex sessionstart"
+            "command": "node \"/absolute/path/to/codex-context-mode/hooks/codex/sessionstart.mjs\""
           }
         ]
       }
@@ -36,7 +36,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"/absolute/path/to/codex-context-mode/cli.bundle.mjs\" hook codex precompact"
+            "command": "node \"/absolute/path/to/codex-context-mode/hooks/codex/precompact.mjs\""
           }
         ]
       }
@@ -46,7 +46,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"/absolute/path/to/codex-context-mode/cli.bundle.mjs\" hook codex userpromptsubmit"
+            "command": "node \"/absolute/path/to/codex-context-mode/hooks/codex/userpromptsubmit.mjs\""
           }
         ]
       }
@@ -56,7 +56,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"/absolute/path/to/codex-context-mode/cli.bundle.mjs\" hook codex stop"
+            "command": "node \"/absolute/path/to/codex-context-mode/hooks/codex/stop.mjs\""
           }
         ]
       }

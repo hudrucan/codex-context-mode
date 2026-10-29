@@ -3,6 +3,9 @@
 # Replace the absolute launcher path with the reviewed fork checkout.
 # On Windows use forward slashes, e.g. D:/repos/codex-context-mode/start.mjs.
 # Pin hooks to the same checkout using configs/codex/hooks.json.
+# Hook commands use node with a quoted direct script path. In PowerShell,
+# pinning Node itself requires: & "C:/Program Files/nodejs/node.exe" "C:/.../hooks/codex/<event>.mjs"
+# A quoted executable without & is a string expression, not a command.
 
 [features]
 hooks = true

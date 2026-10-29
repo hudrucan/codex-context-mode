@@ -127,7 +127,7 @@ describe("standalone local-fork examples", () => {
     });
   });
 
-  it("pins every manual hook to the same local CLI bundle and valid event", () => {
+  it("pins every manual hook to the same direct entrypoints as the plugin", () => {
     const manual = readJson("configs/codex/hooks.json") as {
       hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
     };
@@ -135,7 +135,8 @@ describe("standalone local-fork examples", () => {
     expect(Object.keys(manual.hooks).sort()).toEqual(Object.keys(plugin.hooks).sort());
     for (const [event, groups] of Object.entries(manual.hooks)) {
       for (const group of groups) for (const hook of group.hooks) {
-        expect(hook.command).toBe(`node "/absolute/path/to/codex-context-mode/cli.bundle.mjs" hook codex ${event.toLowerCase()}`);
+        expect(hook.command).toBe(`node "/absolute/path/to/codex-context-mode/hooks/codex/${event.toLowerCase()}.mjs"`);
+        expect(hook.command).toBe(plugin.hooks[event][0].hooks[0].command.replace("${PLUGIN_ROOT}", "/absolute/path/to/codex-context-mode"));
         expect(existsSync(resolve(REPO_ROOT, `hooks/codex/${event.toLowerCase()}.mjs`))).toBe(true);
       }
     }

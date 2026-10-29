@@ -34,11 +34,13 @@ CONTEXT_MODE_PLATFORM = "codex"
 
 On Windows, use forward slashes in TOML, for example `D:/repos/codex-context-mode/start.mjs`. You may pin `command` to the absolute Node executable as well. Do not use a bare `context-mode` command or an npm package runner: either could select an upstream global installation instead of the local fork.
 
-The equivalent MCP JSON example is [.mcp.json.codex.example](.mcp.json.codex.example). Merge [configs/codex/hooks.json](configs/codex/hooks.json) into the hooks configuration for the same Codex home. Replace **every** absolute CLI bundle path with the same reviewed checkout. Example PreToolUse entry inside the hooks object:
+The equivalent MCP JSON example is [.mcp.json.codex.example](.mcp.json.codex.example). Merge [configs/codex/hooks.json](configs/codex/hooks.json) into the hooks configuration for the same Codex home. Replace **every** absolute hook script path with the same reviewed checkout. Example PreToolUse entry inside the hooks object:
 
 ```json
-{"PreToolUse":[{"matcher":"local_shell|shell|shell_command|exec_command|Bash|Shell|apply_patch|Edit|Write|grep_files|ctx_execute|ctx_execute_file|ctx_batch_execute|ctx_fetch_and_index|ctx_search|ctx_index|mcp__","hooks":[{"type":"command","command":"node \"/absolute/path/to/codex-context-mode/cli.bundle.mjs\" hook codex pretooluse"}]}]}
+{"PreToolUse":[{"matcher":"local_shell|shell|shell_command|exec_command|Bash|Shell|apply_patch|Edit|Write|grep_files|ctx_execute|ctx_execute_file|ctx_batch_execute|ctx_fetch_and_index|ctx_search|ctx_index|mcp__","hooks":[{"type":"command","command":"node \"/absolute/path/to/codex-context-mode/hooks/codex/pretooluse.mjs\""}]}]}
 ```
+
+On Windows, keep the bare `node` executable token or use PowerShell's call operator when pinning it: `& "C:/Program Files/nodejs/node.exe" "C:/.../hooks/codex/pretooluse.mjs"`. Quoting both paths without `&` fails in PowerShell before Node starts. MCP `command`/`args` are separate fields and do not use `&`.
 
 Enable and trust the hooks in Codex. MCP availability alone does not prove hooks are running. Incorporate [configs/codex/AGENTS.md](configs/codex/AGENTS.md) without replacing existing project rules.
 

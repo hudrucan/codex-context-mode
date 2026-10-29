@@ -1000,8 +1000,8 @@ describe("Codex CLI hook dispatch (#225)", () => {
     for (const [eventType, entries] of Object.entries(hooksJson.hooks)) {
       for (const entry of entries as any[]) {
         for (const hook of entry.hooks) {
-          // Pin the reviewed fork while preserving the Codex hook dispatcher.
-          expect(hook.command).toMatch(/^node "\/absolute\/path\/to\/codex-context-mode\/cli\.bundle\.mjs" hook codex \w+$/);
+          // Pin the reviewed fork's direct hook entrypoints.
+          expect(hook.command).toMatch(/^node "\/absolute\/path\/to\/codex-context-mode\/hooks\/codex\/\w+\.mjs"$/);
         }
       }
     }

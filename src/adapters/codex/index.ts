@@ -483,7 +483,11 @@ export class CodexAdapter extends BaseAdapter implements HookAdapter {
     return join(base, hashProjectDirCanonical(projectDir));
   }
 
-  generateHookConfig(_pluginRoot: string): HookRegistration {
+  generateHookConfig(pluginRoot: string): HookRegistration {
+    // A bare node token works in PowerShell and POSIX shells. Quoting an
+    // absolute executable in PowerShell requires a leading call operator (&).
+    const command = (event: keyof typeof CODEX_HOOK_COMMANDS) =>
+      `node "${join(pluginRoot, "hooks", "codex", `${event.toLowerCase()}.mjs`).replace(/\\/g, "/")}"`;
     return {
       PreToolUse: [
         {
@@ -491,7 +495,7 @@ export class CodexAdapter extends BaseAdapter implements HookAdapter {
           hooks: [
             {
               type: "command",
-              command: CODEX_HOOK_COMMANDS.PreToolUse,
+              command: command("PreToolUse"),
             },
           ],
         },
@@ -502,7 +506,7 @@ export class CodexAdapter extends BaseAdapter implements HookAdapter {
           hooks: [
             {
               type: "command",
-              command: CODEX_HOOK_COMMANDS.PostToolUse,
+              command: command("PostToolUse"),
             },
           ],
         },
@@ -513,7 +517,7 @@ export class CodexAdapter extends BaseAdapter implements HookAdapter {
           hooks: [
             {
               type: "command",
-              command: CODEX_HOOK_COMMANDS.SessionStart,
+              command: command("SessionStart"),
             },
           ],
         },
@@ -524,7 +528,7 @@ export class CodexAdapter extends BaseAdapter implements HookAdapter {
           hooks: [
             {
               type: "command",
-              command: CODEX_HOOK_COMMANDS.PreCompact,
+              command: command("PreCompact"),
             },
           ],
         },
@@ -535,7 +539,7 @@ export class CodexAdapter extends BaseAdapter implements HookAdapter {
           hooks: [
             {
               type: "command",
-              command: CODEX_HOOK_COMMANDS.UserPromptSubmit,
+              command: command("UserPromptSubmit"),
             },
           ],
         },
@@ -546,7 +550,7 @@ export class CodexAdapter extends BaseAdapter implements HookAdapter {
           hooks: [
             {
               type: "command",
-              command: CODEX_HOOK_COMMANDS.Stop,
+              command: command("Stop"),
             },
           ],
         },
@@ -711,6 +715,12 @@ export class CodexAdapter extends BaseAdapter implements HookAdapter {
         const expectedEntry = entries[0];
         const ok = Array.isArray(actualEntries)
           && actualEntries.some((entry) => this.isExpectedHookEntry(hookName, entry, expectedEntry));
+        const invalidPowerShellInvocation = process.platform === "win32"
+          && Array.isArray(actualEntries)
+          && actualEntries.some((entry) => Array.isArray(entry?.hooks) && entry.hooks.some((hook) =>
+            this.normalizeCommand(hook.command).trim().startsWith('"')
+            && this.isManagedHookCommand(hookName, hook.command),
+          ));
         const missingStatus = hookName === "PreCompact" ? "warn" : "fail";
 
         return {
@@ -718,6 +728,8 @@ export class CodexAdapter extends BaseAdapter implements HookAdapter {
           status: (ok ? "pass" : missingStatus) as "pass" | "warn" | "fail",
           message: ok
             ? `${hookName} hook configured in ${this.getHooksPath()}`
+            : invalidPowerShellInvocation
+              ? `${hookName} hook quotes the executable without the PowerShell call operator (&)`
             : hookName === "PreCompact"
               ? `${hookName} hook missing or not pointing to context-mode; compaction snapshots require a Codex build that emits PreCompact`
               : `${hookName} hook missing or not pointing to context-mode`,
@@ -1166,7 +1178,10 @@ export class CodexAdapter extends BaseAdapter implements HookAdapter {
     if (hookName === "PreToolUse" && entry.matcher !== expectedEntry.matcher) {
       return false;
     }
-    return this.entryContainsManagedCommand(hookName, entry);
+    return (Array.isArray(entry.hooks) ? entry.hooks : []).some((hook) =>
+      this.isManagedHookCommand(hookName, hook.command)
+      && (process.platform !== "win32" || !this.normalizeCommand(hook.command).trim().startsWith('"')),
+    );
   }
 
   private isManagedContextModeEntry(hookName: string, entry: HookEntry): boolean {
@@ -1175,18 +1190,30 @@ export class CodexAdapter extends BaseAdapter implements HookAdapter {
   }
 
   private entryContainsManagedCommand(hookName: string, entry: HookEntry): boolean {
-    const normalizedCommands = (Array.isArray(entry.hooks) ? entry.hooks : [])
-      .map((hook) => this.normalizeCommand(hook.command))
-      .filter((command) => command.length > 0);
-    const expectedCliCommand = this.normalizeCommand(
-      CODEX_HOOK_COMMANDS[hookName as keyof typeof CODEX_HOOK_COMMANDS] ?? "",
+    return (Array.isArray(entry.hooks) ? entry.hooks : []).some((hook) =>
+      this.isManagedHookCommand(hookName, hook.command),
     );
-    const legacySuffixes = LEGACY_HOOK_PATH_SUFFIXES[hookName as keyof typeof LEGACY_HOOK_PATH_SUFFIXES] ?? [];
+  }
 
-    return normalizedCommands.some((command) =>
-      command.includes(expectedCliCommand)
-      || legacySuffixes.some((suffix) => command.includes(suffix)),
-    );
+  private isManagedHookCommand(hookName: string, raw: string | undefined): boolean {
+    const command = this.normalizeCommand(raw).trim();
+    const legacyCli = CODEX_HOOK_COMMANDS[hookName as keyof typeof CODEX_HOOK_COMMANDS];
+    if (legacyCli && command === legacyCli) return true;
+
+    let invocation = command.replace(/^&\s+/, "");
+    const dispatch = invocation.match(/\s+hook\s+codex\s+(\w+)\s*$/);
+    if (dispatch) {
+      if (dispatch[1] !== hookName.toLowerCase()) return false;
+      invocation = invocation.slice(0, dispatch.index);
+    }
+    const tokens = invocation.match(/^(?:"([^"]+)"|(\S+))\s+(?:"([^"]+)"|(\S+))\s*$/);
+    if (!tokens) return false;
+    const runtime = (tokens[1] ?? tokens[2]).split("/").pop();
+    if (!/^(?:node|bun)(?:\.exe)?$/i.test(runtime ?? "")) return false;
+    const script = tokens[3] ?? tokens[4];
+    if (dispatch) return script.endsWith("/cli.bundle.mjs");
+    const suffixes = LEGACY_HOOK_PATH_SUFFIXES[hookName as keyof typeof LEGACY_HOOK_PATH_SUFFIXES] ?? [];
+    return suffixes.some((suffix) => script.endsWith(`/${suffix}`));
   }
 
   private normalizeCommand(command: string | undefined): string {
