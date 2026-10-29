@@ -11,7 +11,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { z } from "zod";
 import { PolyglotExecutor } from "./executor.js";
 import { runPool, type PoolJob } from "./runPool.js";
-import { ContentStore, cleanupStaleDBs, cleanupStaleContentDBs, type SearchResult, type IndexResult } from "./store.js";
+import { ContentStore, cleanupStaleDBs, type SearchResult, type IndexResult } from "./store.js";
 import { composeFetchCacheKey } from "./fetch-cache.js";
 import {
   readBashPolicies,
@@ -464,8 +464,6 @@ function getStore(): ContentStore {
   const dbPath = getStorePath();
   let store = stores.get(dbPath);
   if (!store) {
-    // Content DB cleanup on fresh start is handled by SessionStart hook.
-    // Server just opens whatever DB exists (or creates new if hook deleted it).
     store = new ContentStore(dbPath);
     stores.set(dbPath, store);
 
@@ -489,14 +487,9 @@ function getStore(): ContentStore {
       }
     });
 
-    // One-time startup cleanup: remove stale content DBs (>14 days)
+    // Expire records transactionally; file ages cannot prove that writers have stopped.
     try {
-      const contentDir = dirname(getStorePath());
-      cleanupStaleContentDBs(contentDir, 14);
       store.cleanupStaleSources(14);
-      // Also clean legacy shared dir from before platform isolation
-      const legacyDir = join(homedir(), ".context-mode", "content");
-      if (existsSync(legacyDir)) cleanupStaleContentDBs(legacyDir, 0);
     } catch { /* best-effort */ }
 
     // Also clean old PID-based DBs from migration
@@ -4032,7 +4025,7 @@ EXAMPLE: ctx_purge(confirm: true, scope: "project")`,
     } catch { /* best effort — store path may be unresolvable on fresh install */ }
     if (storePathForPurge) {
       const store = stores.get(storePathForPurge);
-      try { store?.cleanup(); } catch { /* best effort */ }
+      try { store?.close(); } catch { /* best effort */ }
       stores.delete(storePathForPurge);
     }
 

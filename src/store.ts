@@ -200,66 +200,6 @@ export function cleanupStaleDBs(): number {
   return cleaned;
 }
 
-/**
- * Check if a PID is still alive (not a zombie holding a WAL lock).
- * Returns true if the process exists, false if it's dead.
- */
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Clean up stale per-project content store DBs older than maxAgeDays.
- * Scans the given directory for *.db files and checks mtime.
- * Also detects zombie processes holding WAL locks — if a WAL file exists
- * but the owning PID is dead, the DB files are cleaned up regardless of age.
- */
-export function cleanupStaleContentDBs(contentDir: string, maxAgeDays: number): number {
-  let cleaned = 0;
-  try {
-    if (!existsSync(contentDir)) return 0;
-    const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
-    const files = readdirSync(contentDir).filter(f => f.endsWith(".db"));
-    for (const file of files) {
-      try {
-        const filePath = join(contentDir, file);
-        const mtime = statSync(filePath).mtimeMs;
-        let shouldClean = mtime < cutoff;
-
-        // Detect zombie processes holding WAL locks:
-        // If a WAL file exists, try to read the WAL header to extract the PID.
-        // WAL files from dead processes can block new connections.
-        if (!shouldClean) {
-          const walPath = filePath + "-wal";
-          if (existsSync(walPath)) {
-            try {
-              const walStat = statSync(walPath);
-              // If WAL file is non-empty and DB hasn't been modified in >1 hour,
-              // the owning process may be dead — check via mtime staleness
-              if (walStat.size > 0 && (Date.now() - walStat.mtimeMs) > 3600_000) {
-                shouldClean = true;
-              }
-            } catch { /* ignore WAL check errors */ }
-          }
-        }
-
-        if (shouldClean) {
-          for (const suffix of ["", "-wal", "-shm"]) {
-            try { unlinkSync(filePath + suffix); } catch { /* ignore */ }
-          }
-          cleaned++;
-        }
-      } catch { /* ignore per-file errors */ }
-    }
-  } catch { /* ignore readdir errors */ }
-  return cleaned;
-}
-
 // ── Proximity helpers (pure functions) ──
 
 /** Find all positions of a term in text. */
@@ -448,7 +388,7 @@ export class ContentStore {
     this.#prepareStatements();
   }
 
-  /** Delete this session's DB files. Call on process exit. */
+  /** Explicitly delete this store's DB files. Use close() to preserve persistent content. */
   cleanup(): void {
     try {
       this.#db.close();
