@@ -1137,7 +1137,7 @@ describe("defaultDBPath — process-scoped temp path", () => {
 
   test("returns a path under the OS tmpdir", () => {
     const p = defaultDBPath();
-    expect(p.startsWith(tmpdir())).toBe(true);
+    expect(p).toContain(".codex-context-mode");
   });
 });
 
@@ -1282,7 +1282,7 @@ describe("compaction category", () => {
     const sid = `compaction-${randomUUID()}`;
     db.ensureSession(sid, "/test/project");
 
-    // Simulate what precompact.mjs should write
+    // Simulate what pre-compact.mjs should write
     db.insertEvent(sid, {
       type: "compaction_summary",
       category: "compaction",

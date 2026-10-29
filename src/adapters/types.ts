@@ -349,7 +349,7 @@ export interface DiagnosticResult {
  * `validateHooks()` instead.
  */
 export interface HealthCheck {
-  /** Human-readable check title (e.g. "Hook script exists: pretooluse.mjs"). */
+  /** Human-readable check title (e.g. "Hook script exists: pre-tool-use.mjs"). */
   readonly name: string;
   /** Synchronous check thunk. Returns OK or FAIL with optional detail. */
   check(): { status: "OK" | "FAIL"; detail?: string };

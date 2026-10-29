@@ -19,7 +19,7 @@ import { renderTaskState, type StoredEvent } from "../../src/session/snapshot.js
 import { buildSessionDirective, writeSessionEventsFile, groupEvents } from "../../hooks/session-directive.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const HOOK_PATH = join(__dirname, "..", "..", "hooks", "codex", "sessionstart.mjs");
+const HOOK_PATH = join(__dirname, "..", "..", "hooks", "codex", "session-start.mjs");
 
 // ── Helpers ──────────────────────────────────────────────────────────
 

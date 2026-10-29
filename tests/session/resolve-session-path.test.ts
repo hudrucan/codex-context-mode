@@ -72,7 +72,7 @@ describe("resolveSessionPath (generalized)", () => {
   });
 
   it.skipIf(process.platform === "linux")(
-    "migrates legacy raw-casing FILE to canonical name for arbitrary ext",
+    "does not migrate legacy files into the clean layout",
     () => {
       const repo = makeRepo("migrate-events");
       const sessionsDir = makeSessionsDir();
@@ -91,9 +91,8 @@ describe("resolveSessionPath (generalized)", () => {
       });
 
       expect(resolved).toBe(join(sessionsDir, `${canonicalHash}-events.md`));
-      expect(existsSync(resolved)).toBe(true);
-      expect(readFileSync(resolved, "utf8")).toBe("# legacy events\nhello");
-      expect(existsSync(legacyEvents)).toBe(false);
+      expect(existsSync(resolved)).toBe(false);
+      expect(readFileSync(legacyEvents, "utf8")).toBe("# legacy events\nhello");
     },
   );
 

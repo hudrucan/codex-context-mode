@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildSync } from "esbuild";
+// @ts-expect-error explicit build-time packaging helper
+import { packagePlugin } from "../../scripts/package-plugin.mjs";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
@@ -19,22 +20,11 @@ let repoB: string;
 
 beforeAll(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), "ctx-codex-launcher-")));
-  pluginDir = join(root, ".codex", "plugins", "cache", "context-mode", "context-mode", "1.0.169");
+  pluginDir = join(root, ".codex", "plugins", "cache", "codex-context-mode", "codex-context-mode", "1.0.169");
   repoA = join(root, "alpha");
   repoB = join(root, "beta");
-  for (const dir of [pluginDir, repoA, repoB]) mkdirSync(dir, { recursive: true });
-  copyFileSync(resolve("start.mjs"), join(pluginDir, "start.mjs"));
-  copyFileSync(resolve("package.json"), join(pluginDir, "package.json"));
-  mkdirSync(join(pluginDir, "hooks"));
-  copyFileSync(resolve("hooks/ensure-deps.mjs"), join(pluginDir, "hooks", "ensure-deps.mjs"));
-  symlinkSync(realpathSync(resolve("node_modules")), join(pluginDir, "node_modules"), process.platform === "win32" ? "junction" : "dir");
-  // Match the production bundle's runtime dependency boundaries.
-  buildSync({
-    absWorkingDir: resolve("."), entryPoints: ["src/server.ts"],
-    outfile: join(pluginDir, "server.bundle.mjs"), bundle: true,
-    platform: "node", target: "node18", format: "esm",
-    external: ["better-sqlite3", "turndown", "turndown-plugin-gfm", "@mixmark-io/domino"],
-  });
+  for (const dir of [repoA, repoB]) mkdirSync(dir, { recursive: true });
+  packagePlugin(pluginDir);
 }, 30_000);
 
 afterAll(async () => {
@@ -57,7 +47,7 @@ async function launch(
     writeFileSync(join(sessions, `${id}.jsonl`), JSON.stringify({ type: "session_meta", payload: { id, cwd } }) + "\n");
   }
   const env = Object.fromEntries(Object.entries(process.env).filter((e): e is [string, string] => typeof e[1] === "string"));
-  for (const key of ["CONTEXT_MODE_PLATFORM", "CONTEXT_MODE_PROJECT_DIR", "CONTEXT_MODE_PROJECT_DIR_SOURCE", "CONTEXT_MODE_DIR", "CONTEXT_MODE_DATA_DIR", "CONTEXT_MODE_SESSION_DIR", "CONTEXT_MODE_SESSION_SUFFIX", "CONTEXT_MODE_EMBEDDED_PLUGIN_TOOLS"]) delete env[key];
+  for (const key of ["CODEX_CONTEXT_MODE_HOME", "CONTEXT_MODE_PLATFORM", "CONTEXT_MODE_PROJECT_DIR", "CONTEXT_MODE_PROJECT_DIR_SOURCE", "CONTEXT_MODE_DIR", "CONTEXT_MODE_DATA_DIR", "CONTEXT_MODE_SESSION_DIR", "CONTEXT_MODE_SESSION_SUFFIX", "CONTEXT_MODE_EMBEDDED_PLUGIN_TOOLS"]) delete env[key];
   Object.assign(env, {
     HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: join(home, ".claude"),
     CODEX_HOME: codexHome, VITEST: "true",
@@ -139,12 +129,12 @@ describe("Codex workspace routing through production start.mjs", () => {
     }
   });
 
-  it.each(["CONTEXT_MODE_DIR", "CONTEXT_MODE_DATA_DIR"])("preserves %s across restart and concurrent repositories", async (key) => {
+  it.each(["CONTEXT_MODE_DIR", "CODEX_CONTEXT_MODE_HOME"])("preserves %s across restart and concurrent repositories", async (key) => {
     const storage = mkdtempSync(join(root, "storage-"));
     const overrides = { [key]: storage };
     const first = await launch(overrides, { platform: null });
-    const expectedContent = key === "CONTEXT_MODE_DATA_DIR"
-      ? join(storage, "context-mode", "content") : join(storage, "content");
+    const expectedContent = key === "CODEX_CONTEXT_MODE_HOME"
+      ? join(storage, "data", "content") : join(storage, "content");
     for (const [threadId, repo, marker] of [[alpha, repoA, "ALPHA"], [beta, repoB, "BETA"]]) {
       const result = await first.callTool({ name: "ctx_index", _meta: { threadId }, arguments: { content: "StorageIsolation " + marker, source: "storage-fixture" } });
       expect(result.isError).not.toBe(true);
@@ -165,13 +155,7 @@ describe("Codex workspace routing through production start.mjs", () => {
 
   it("does not generate an upstream upgrade command through MCP", async () => {
     const client = await launch({}, { clientName: "codex-mcp-client", platform: null });
-    const result = await client.callTool({ name: "ctx_upgrade", _meta: { threadId: alpha }, arguments: {} });
-    expect(result.isError).toBe(true);
-    const output = (result.content as Array<{ text?: string }>).map(c => c.text ?? "").join("\n");
-    expect(output).toContain("Self-upgrade is disabled for this fork");
-    expect(output).toContain("No upgrade command was generated");
-    expect(output).not.toMatch(/git clone|npm (?:install|update)|https:\/\/github\.com/);
-    expect(clientPaths.get(client)!.stderr()).not.toContain("UNEXPECTED_UPSTREAM_CALL");
+    expect((await client.listTools()).tools.map(t => t.name)).not.toContain("ctx_upgrade");
   });
 
   it.each(["Codex", "codex-mcp-client"])("routes %s threads without a platform override", async (clientName) => {
@@ -195,7 +179,7 @@ describe("Codex workspace routing through production start.mjs", () => {
   it("keeps Codex SQLite content and continuity under CODEX_HOME without a platform override", async () => {
     const client = await launch({}, { clientName: "codex-mcp-client", platform: null });
     const { codexHome, claudeConfigDir } = clientPaths.get(client)!;
-    const codexSessions = join(codexHome, "context-mode", "sessions");
+    const codexSessions = join(dirname(codexHome), ".codex-context-mode", "data", "sessions");
     const claudeSessions = join(claudeConfigDir, "context-mode", "sessions");
     for (const dir of [codexSessions, claudeSessions]) mkdirSync(dir, { recursive: true });
     for (const [repo, marker] of [[repoA, "ALPHA"], [repoB, "BETA"]]) {
@@ -209,7 +193,7 @@ describe("Codex workspace routing through production start.mjs", () => {
         arguments: { content: `# Platform fixture\n\nPlatformIsolation CODEX_${marker}_INDEXED`, source: "platform-fixture" },
       });
       expect(index.isError).not.toBe(true);
-      const contentDb = join(codexHome, "context-mode", "content", `${hashProjectDirCanonical(repo)}.db`);
+      const contentDb = join(dirname(codexHome), ".codex-context-mode", "data", "content", `${hashProjectDirCanonical(repo)}.db`);
       expect(existsSync(contentDb)).toBe(true);
       expect(readFileSync(contentDb).subarray(0, 16).toString()).toBe("SQLite format 3\0");
       for (const [source, expected] of [["platform-fixture", `CODEX_${marker}_INDEXED`], ["session-events", `CODEX_${marker}_CONTINUITY`]]) {
@@ -240,7 +224,7 @@ describe("Codex workspace routing through production start.mjs", () => {
     expect((await probe(client)).isError).toBe(true);
     const index = await client.callTool({ name: "ctx_index", _meta: { threadId: alpha }, arguments: { content: "CodexOnly platform fixture", source: "codex-only" } });
     expect(index.isError).not.toBe(true);
-    const contentDb = join(codexHome, "context-mode", "content", `${hashProjectDirCanonical(repoA)}.db`);
+    const contentDb = join(dirname(codexHome), ".codex-context-mode", "data", "content", `${hashProjectDirCanonical(repoA)}.db`);
     expect(readFileSync(contentDb).subarray(0, 16).toString()).toBe("SQLite format 3\0");
     expect(existsSync(join(claudeConfigDir, "context-mode", "content"))).toBe(false);
     expect(existsSync(join(dirname(claudeConfigDir), ".gemini", "context-mode", "content"))).toBe(false);

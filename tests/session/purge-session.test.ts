@@ -240,30 +240,6 @@ describe("purgeSession — slice 5: knowledge base FTS5 store", () => {
 // Slice 6 — legacy ~/.context-mode/content/<hash>.db store
 // ─────────────────────────────────────────────────────────
 
-describe("purgeSession — slice 6: legacy shared content store", () => {
-  it("wipes legacy content db + sidecars at legacyContentDir/<contentHash>.db", () => {
-    const projectDir = makeRepo("s6");
-    const sessionsDir = makeTmpDir("sess6");
-    const legacyContentDir = makeTmpDir("legacy6");
-    const contentHash = "deadbeefcafebabe";
-    const legacyDb = join(legacyContentDir, `${contentHash}.db`);
-    touchSqliteTriple(legacyDb);
-
-    purgeSession({ projectDir, sessionsDir, legacyContentDir, contentHash });
-
-    expect(existsSync(legacyDb)).toBe(false);
-    expect(existsSync(`${legacyDb}-wal`)).toBe(false);
-    expect(existsSync(`${legacyDb}-shm`)).toBe(false);
-  });
-
-  it("is a no-op when legacyContentDir not provided", () => {
-    const projectDir = makeRepo("s6b");
-    const sessionsDir = makeTmpDir("sess6b");
-    // no throw; result has no legacy path entries
-    expect(() => purgeSession({ projectDir, sessionsDir })).not.toThrow();
-  });
-});
-
 // ─────────────────────────────────────────────────────────
 // Slice 7 — fresh install (no files exist) is non-throwing no-op
 // ─────────────────────────────────────────────────────────

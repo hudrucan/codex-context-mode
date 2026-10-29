@@ -17,7 +17,7 @@
  * than the cleanup horizon (default 7 days). pid-XXX detection probes are
  * still cleaned aggressively because they're noise, not real work.
  *
- * Test strategy: drive the EXACT cleanup statement from sessionstart.mjs
+ * Test strategy: drive the EXACT cleanup statement from session-start.mjs
  * against a seeded DB. Re-running this against the unfixed code MUST fail
  * (proves the bug). Re-running against the fixed code MUST pass.
  */
@@ -33,7 +33,7 @@ import { dirname } from "node:path";
 import { SessionDB } from "../../src/session/db.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const HOOK_PATH = join(__dirname, "..", "..", "hooks", "codex", "sessionstart.mjs");
+const HOOK_PATH = join(__dirname, "..", "..", "hooks", "codex", "session-start.mjs");
 
 const cleanups: Array<() => void> = [];
 afterAll(() => {
@@ -51,7 +51,7 @@ function createTestDB(): SessionDB {
 
 /**
  * Pull the cleanup SQL out of the live hook source so this test stays in
- * lockstep with hooks/sessionstart.mjs. If the hook gets refactored, the
+ * lockstep with hooks/session-start.mjs. If the hook gets refactored, the
  * test still exercises whatever DELETE statement ships.
  */
 function loadCleanupSql(): string {
@@ -60,13 +60,13 @@ function loadCleanupSql(): string {
   // The hook may use a single-line or multi-line backtick string.
   const match = src.match(/db\.db\.exec\(`([^`]*DELETE FROM session_events[^`]*)`\)/);
   if (!match) {
-    throw new Error("Could not find cleanup DELETE statement in hooks/sessionstart.mjs");
+    throw new Error("Could not find cleanup DELETE statement in hooks/session-start.mjs");
   }
   return match[1];
 }
 
 function runCleanup(db: SessionDB): void {
-  // Mirror what sessionstart.mjs does on a fresh startup (source === "startup").
+  // Mirror what session-start.mjs does on a fresh startup (source === "startup").
   db.cleanupOldSessions(7);
   db.db.exec(loadCleanupSql());
 }
@@ -104,7 +104,7 @@ describe("SessionStart cleanup — UUID-format orphan event protection", () => {
       .get(liveUuid);
     expect(metaRow).toBeUndefined();
 
-    // Run cleanup the way sessionstart.mjs does on a fresh startup.
+    // Run cleanup the way session-start.mjs does on a fresh startup.
     runCleanup(db);
 
     // The events MUST survive. Pre-fix this fails (count drops to 0).

@@ -1,7 +1,7 @@
 /**
- * D2 PRD Phase 6.2 — sessionstart.mjs emits snapshot-consumed with bytes_returned.
+ * D2 PRD Phase 6.2 — session-start.mjs emits snapshot-consumed with bytes_returned.
  *
- * Pre-seeds a session_resume row, runs sessionstart.mjs with source=compact,
+ * Pre-seeds a session_resume row, runs session-start.mjs with source=compact,
  * then asserts the new event row landed with
  * `category='session-resume', type='snapshot-consumed', bytes_returned == snapshot.length`.
  */
@@ -24,7 +24,7 @@ const _hashCanonical = (p: string) => createHash("sha256").update(
 ).digest("hex").slice(0, 16);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SESSIONSTART_PATH = join(__dirname, "..", "..", "hooks", "codex", "sessionstart.mjs");
+const SESSIONSTART_PATH = join(__dirname, "..", "..", "hooks", "codex", "session-start.mjs");
 
 interface RawEventRow {
   type: string;
@@ -49,7 +49,7 @@ function readEvents(dbPath: string, sessionId: string, type: string): RawEventRo
   }
 }
 
-describe("sessionstart.mjs — snapshot-consumed event (D2 PRD Phase 6.2)", () => {
+describe("session-start.mjs — snapshot-consumed event (D2 PRD Phase 6.2)", () => {
   let fakeHome: string;
   let fakeProject: string;
   let env: Record<string, string>;
@@ -79,14 +79,14 @@ describe("sessionstart.mjs — snapshot-consumed event (D2 PRD Phase 6.2)", () =
     // must apply the same normalization before SHA — otherwise on Windows the
     // expected hash uses backslashes while the hook uses slashes (#435 pattern).
     const projectHash = _hashCanonical(fakeProject.replace(/\\/g, "/"));
-    const dbDir = join(fakeHome, ".codex", "context-mode", "sessions");
+    const dbDir = join(fakeHome, ".codex-context-mode", "data", "sessions");
     mkdirSync(dbDir, { recursive: true });
     const dbPath = join(dbDir, `${projectHash}.db`);
 
     {
       const seedDb = new SessionDB({ dbPath });
       seedDb.ensureSession(sessionId, fakeProject);
-      // sessionstart.mjs (source=compact) takes the resume snapshot path only
+      // session-start.mjs (source=compact) takes the resume snapshot path only
       // when getSessionEvents() returns a non-empty list. Seed at least one
       // event so the directive branch — and then the snapshot-consumed emit —
       // run.

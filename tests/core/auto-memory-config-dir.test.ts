@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { searchAutoMemory } from "../../src/search/auto-memory.js";
+import { runtimePaths } from "../../src/runtime-paths.js";
 import { hashProjectDirCanonical } from "../../src/session/db.js";
 
 /**
@@ -35,7 +36,7 @@ describe("searchAutoMemory CODEX_HOME fallback (#460 round-3)", () => {
     // Issue #663: the adapterless fallback now scopes by projectDir hash
     // so two projects can't share a memory dir. CODEX_HOME routing
     // is still honored — the hash suffix lives underneath the env root.
-    const memDir = join(customCfg, "memories", hashProjectDirCanonical(projectDir));
+    const memDir = join(runtimePaths().memory, hashProjectDirCanonical(projectDir));
     mkdirSync(memDir, { recursive: true });
     writeFileSync(
       join(memDir, "decisions.md"),

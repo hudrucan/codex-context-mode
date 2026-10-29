@@ -12,7 +12,7 @@
  * Scan: glob all context-mode-mcp-ready-* files, probe each PID.
  */
 import { readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { runtimeCacheDir } from "../runtime-paths.mjs";
 import { join } from "node:path";
 
 const SENTINEL_PREFIX = "context-mode-mcp-ready-";
@@ -35,7 +35,7 @@ const SENTINEL_FRESH_MS = 90_000;
 export function sentinelDir() {
   const override = process.env.CONTEXT_MODE_MCP_SENTINEL_DIR;
   if (override && override.length > 0) return override;
-  return process.platform === "win32" ? tmpdir() : "/tmp";
+  return runtimeCacheDir();
 }
 
 /**

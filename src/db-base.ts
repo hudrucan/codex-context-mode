@@ -10,7 +10,7 @@ import type DatabaseConstructor from "better-sqlite3";
 import type { Database as DatabaseInstance } from "better-sqlite3";
 import { createRequire } from "node:module";
 import { existsSync, unlinkSync, renameSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { assertMutablePath, runtimeCacheDir } from "./runtime-paths.js";
 import { join } from "node:path";
 // v1.0.130 — `acquireDbLock` + `locking_mode = EXCLUSIVE` were REMOVED.
 // See docs/adr/0001-sessiondb-multi-writer.md for the architectural
@@ -218,7 +218,7 @@ export function nodeSqliteHasFts5(DatabaseSync: any): boolean {
  * - Bun has `bun:sqlite` always
  * - Node has `node:sqlite` since 22.5 (no flag since 22.13)
  *
- * Mirrors the helper in hooks/ensure-deps.mjs:61. Exported so the platform
+ * Exported so the platform
  * gate in loadDatabase() can be unit-tested without spawning a child
  * process. `versionsOverride` and `bunOverride` are injection points for
  * tests — production callers pass nothing.
@@ -411,11 +411,11 @@ export function closeDB(db: DatabaseInstance): void {
 
 /**
  * Return the default per-process DB path for context-mode databases.
- * Uses the OS temp directory and embeds the current PID so multiple
+ * Uses the external runtime cache and embeds the current PID so multiple
  * server instances never share a file.
  */
 export function defaultDBPath(prefix: string = "context-mode"): string {
-  return join(tmpdir(), `${prefix}-${process.pid}.db`);
+  return join(runtimeCacheDir(), `${prefix}-${process.pid}.db`);
 }
 
 // ─────────────────────────────────────────────────────────
@@ -549,6 +549,7 @@ export abstract class SQLiteBase {
    * regression-proof anchor (source-pin + behavioural).
    */
   constructor(dbPath: string) {
+    if (dbPath !== ":memory:") assertMutablePath(dbPath);
     const Database = loadDatabase();
     this.#dbPath = dbPath;
     cleanOrphanedWALFiles(dbPath);

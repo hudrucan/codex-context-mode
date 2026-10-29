@@ -1,8 +1,9 @@
+import { runtimeCacheDir } from "../../hooks/runtime-paths.mjs";
 /**
  * Hook Integration Tests
  *
  * Consolidated from:
- * - tests/hook-integration.test.ts (pretooluse.mjs hook tests)
+ * - tests/hook-integration.test.ts (pre-tool-use.mjs hook tests)
  */
 
 import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
@@ -37,7 +38,7 @@ function rmSyncRobust(dir: string) {
 import { tmpdir } from "node:os";
 
 // ═══════════════════════════════════════════════════════════════════════
-// Hook Integration Tests -- pretooluse.mjs
+// Hook Integration Tests -- pre-tool-use.mjs
 // ═══════════════════════════════════════════════════════════════════════
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -50,7 +51,7 @@ afterAll(() => {
   for (const [key, value] of Object.entries(savedTmpEnv)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
   rmSync(codexHookTemp, { recursive: true, force: true });
 });
-const HOOK_PATH = join(__dirname, "..", "..", "hooks", "codex", "pretooluse.mjs");
+const HOOK_PATH = join(__dirname, "..", "..", "hooks", "codex", "pre-tool-use.mjs");
 
 // Clean guidance throttle markers before each test so guidance fires fresh.
 // Subprocess hooks scope markers two ways (#298): the legacy ppid-based dir
@@ -59,15 +60,15 @@ const HOOK_PATH = join(__dirname, "..", "..", "hooks", "codex", "pretooluse.mjs"
 // the hook payload has no session_id).
 const _wid = process.env.VITEST_WORKER_ID;
 const _guidanceSuffix = _wid ? `${process.pid}-w${_wid}` : String(process.pid);
-const _guidanceDir = resolve(tmpdir(), `context-mode-guidance-${_guidanceSuffix}`);
-const _sessionGuidanceDir = resolve(tmpdir(), `context-mode-guidance-s-pid-${process.pid}`);
+const _guidanceDir = resolve(runtimeCacheDir(), `codex-context-mode-guidance-${_guidanceSuffix}`);
+const _sessionGuidanceDir = resolve(runtimeCacheDir(), `codex-context-mode-guidance-s-pid-${process.pid}`);
 
 // MCP readiness sentinel — subprocess hooks check process.ppid (= this test's pid)
 // Use the same sentinel directory that isMCPReady() scans: /tmp on Unix, tmpdir() on Windows.
 // On macOS, tmpdir() returns /var/folders/... but isMCPReady() hardcodes /tmp — if we write
 // the sentinel to tmpdir(), CI environments (with no running MCP server in /tmp) will fail
 // because isMCPReady() returns false and all mcpRedirect() calls become passthrough (#347).
-const mcpSentinelDir = process.platform === "win32" ? tmpdir() : "/tmp";
+const mcpSentinelDir = runtimeCacheDir();
 const mcpSentinel = resolve(mcpSentinelDir, `context-mode-mcp-ready-${process.pid}`);
 
 beforeEach(() => {
@@ -92,7 +93,7 @@ function runHook(input: Record<string, unknown>, env?: Record<string, string>, {
     input: bom ? "\uFEFF" + json : json,
     encoding: "utf-8",
     timeout: 30_000,
-    env: { ...process.env, ...env },
+    env: { ...process.env, CONTEXT_MODE_MCP_SENTINEL_DIR: mcpSentinelDir, ...env },
   });
   const rawOutput = (result.stdout ?? "").trim();
   const passthrough = rawOutput === JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse" } });
@@ -683,42 +684,20 @@ describe("Plugin Tool Name Format in ROUTING_BLOCK", () => {
 describe("Skill Commands", () => {
   const SKILLS_DIR = join(__dirname, "..", "..", "skills");
 
-  test("ctx-doctor skill directory exists with valid SKILL.md", () => {
-    const skillMd = join(SKILLS_DIR, "ctx-doctor", "SKILL.md");
-    assert.ok(existsSync(skillMd), "skills/ctx-doctor/SKILL.md must exist");
-    const content = readFileSync(skillMd, "utf-8");
-    assert.ok(content.includes("name: ctx-doctor"), "SKILL.md name must be ctx-doctor");
-    assert.ok(content.includes("/context-mode:ctx-doctor"), "Trigger must reference ctx-doctor");
-  });
-
-  test("ctx-upgrade skill directory exists with valid SKILL.md", () => {
-    const skillMd = join(SKILLS_DIR, "ctx-upgrade", "SKILL.md");
-    assert.ok(existsSync(skillMd), "skills/ctx-upgrade/SKILL.md must exist");
-    const content = readFileSync(skillMd, "utf-8");
-    assert.ok(content.includes("name: ctx-upgrade"), "SKILL.md name must be ctx-upgrade");
-    assert.ok(content.includes("/context-mode:ctx-upgrade"), "Trigger must reference ctx-upgrade");
-  });
-
-  test("ctx-stats skill directory exists with valid SKILL.md", () => {
-    const skillMd = join(SKILLS_DIR, "ctx-stats", "SKILL.md");
-    assert.ok(existsSync(skillMd), "skills/ctx-stats/SKILL.md must exist");
-    const content = readFileSync(skillMd, "utf-8");
-    assert.ok(content.includes("name: ctx-stats"), "SKILL.md name must be ctx-stats");
-    assert.ok(content.includes("/context-mode:ctx-stats"), "Trigger must reference ctx-stats");
-  });
-
-  test("old skill directories (doctor, upgrade, stats) no longer exist", () => {
-    for (const old of ["doctor", "upgrade", "stats"]) {
-      assert.ok(
-        !existsSync(join(SKILLS_DIR, old)),
-        `Old skill directory skills/${old} must not exist`,
-      );
+  test("bundles only the six plugin skills", () => {
+    for (const name of ["main", "doctor", "index", "search", "stats", "purge"]) {
+      const skill = join(SKILLS_DIR, name, "SKILL.md");
+      assert.ok(existsSync(skill));
+      assert.ok(readFileSync(skill, "utf8").includes("name: " + name));
+    }
+    for (const old of ["context-mode", "ctx-doctor", "ctx-index", "ctx-search", "ctx-stats", "ctx-purge", "ctx-upgrade", "ctx-insight"]) {
+      assert.ok(!existsSync(join(SKILLS_DIR, old, "SKILL.md")));
     }
   });
 });
 
 describe("UTF-8 BOM handling (core/stdin.mjs path)", () => {
-  test("pretooluse.mjs parses BOM-prefixed stdin without error", () => {
+  test("pre-tool-use.mjs parses BOM-prefixed stdin without error", () => {
     const result = runHook({
       tool_name: "Glob",
       tool_input: { pattern: "**/*.ts" },
@@ -726,7 +705,7 @@ describe("UTF-8 BOM handling (core/stdin.mjs path)", () => {
     assertPassthrough(result);
   });
 
-  test("pretooluse.mjs handles BOM-prefixed Bash input correctly", () => {
+  test("pre-tool-use.mjs handles BOM-prefixed Bash input correctly", () => {
     const result = runHook({
       tool_name: "Bash",
       tool_input: { command: "curl -s http://example.com" },
@@ -814,7 +793,7 @@ describe("empty stdin resilience (#322)", () => {
   }
 
   // All 6 adapters × their hook files
-  const hooks = ["codex/sessionstart.mjs", "codex/pretooluse.mjs", "codex/posttooluse.mjs", "codex/precompact.mjs", "codex/userpromptsubmit.mjs", "codex/stop.mjs"];
+  const hooks = ["codex/session-start.mjs", "codex/pre-tool-use.mjs", "codex/post-tool-use.mjs", "codex/pre-compact.mjs", "codex/user-prompt-submit.mjs", "codex/stop.mjs"];
 
   for (const hook of hooks) {
     test(`${hook} exits 0 on empty stdin`, () => {
@@ -826,13 +805,13 @@ describe("empty stdin resilience (#322)", () => {
 // ═══════════════════════════════════════════════════════════════════════
 // Issue #636 — PreToolUse hook fails on project paths containing spaces.
 //
-// The self-heal "legacy" branch in pretooluse.mjs (only fires when the
+// The self-heal "legacy" branch in pre-tool-use.mjs (only fires when the
 // plugin cache lives at a stale-version dir AND hooks.json is absent —
 // typical for users who upgraded from <v1.0.108) used to write hook
 // commands as the unquoted string `node ${path}`. When the plugin cache
 // path contained spaces (Dropbox/iCloud display names, CODEX_HOME
 // pointed at a synced folder), the resulting settings.json had a command
-// like `node /Users/foo/Library/CloudStorage/Lucas Werneck/.../pretooluse.mjs`
+// like `node /Users/foo/Library/CloudStorage/Lucas Werneck/.../pre-tool-use.mjs`
 // that /bin/sh word-split into pieces, producing the user-visible
 // "Failed with non-blocking status code" spam on every tool call.
 //
@@ -847,7 +826,7 @@ describe("Issue #636: legacy settings.json rewrite quotes spaced paths", () => {
   // covered by tests/hooks/windows-hooks-normalization.test.ts.
   const skipOnWindows = process.platform === "win32";
 
-  // The legacy rewrite at hooks/pretooluse.mjs:124-135 is a self-contained
+  // The legacy rewrite at hooks/pre-tool-use.mjs:124-135 is a self-contained
   // string mutation. We replicate it here verbatim against the FIXED code so
   // the regression is locked in even if future contributors restructure the
   // block. The test deliberately uses a *spaced* targetDir to mirror the
@@ -862,7 +841,7 @@ describe("Issue #636: legacy settings.json rewrite quotes spaced paths", () => {
       const scriptMatch = command.match(/([a-z]+\.mjs)\s*"?\s*$/);
       if (scriptMatch) {
         const scriptPath = resolve(targetDir, "hooks", scriptMatch[1]);
-        // MUST match the production form in hooks/pretooluse.mjs (#636 fix):
+        // MUST match the production form in hooks/pre-tool-use.mjs (#636 fix):
         // path is JSON.stringify'd so spaces inside targetDir survive
         // /bin/sh word-splitting at hook-spawn time.
         return `node ${JSON.stringify(scriptPath)}`;
@@ -877,17 +856,17 @@ describe("Issue #636: legacy settings.json rewrite quotes spaced paths", () => {
       const spacedTargetDir =
         "/Users/foo/Library/CloudStorage/Dropbox-2olhares/Lucas Werneck/.claude/plugins/cache/context-mode/context-mode/1.0.140";
       const staleCommand =
-        "node /old/path/context-mode/0.5.0/hooks/pretooluse.mjs";
+        "node /old/path/context-mode/0.5.0/hooks/pre-tool-use.mjs";
 
       const rewritten = applyLegacyRewrite(staleCommand, spacedTargetDir);
       expect(rewritten).not.toBeNull();
       expect(rewritten).toContain("Lucas Werneck");
-      expect(rewritten).toContain("/hooks/pretooluse.mjs");
+      expect(rewritten).toContain("/hooks/pre-tool-use.mjs");
 
       // CORE ASSERTION (#636): /bin/sh -c "<cmd>" must parse the path as
       // a single positional arg, not split on whitespace. Use `printf %s\n`
       // to enumerate the post-split argv — the OLD unquoted form yielded
-      // 4 tokens (node, /Users/foo/.../Lucas, Werneck/..., pretooluse.mjs);
+      // 4 tokens (node, /Users/foo/.../Lucas, Werneck/..., pre-tool-use.mjs);
       // the FIXED form yields exactly 2 (node + quoted script path).
       const probe = spawnSync(
         "/bin/sh",
@@ -899,7 +878,7 @@ describe("Issue #636: legacy settings.json rewrite quotes spaced paths", () => {
       expect(lines[0]).toBe("2"); // exactly: node + script
       expect(lines[1]).toBe("node");
       expect(lines[2]).toBe(
-        resolve(spacedTargetDir, "hooks", "pretooluse.mjs"),
+        resolve(spacedTargetDir, "hooks", "pre-tool-use.mjs"),
       );
     },
   );
@@ -913,7 +892,7 @@ describe("Issue #636: legacy settings.json rewrite quotes spaced paths", () => {
       const spacedTargetDir =
         "/Users/foo/Library/CloudStorage/Lucas Werneck/.claude/plugins/cache/context-mode/context-mode/1.0.140";
       const buggyForm =
-        "node " + resolve(spacedTargetDir, "hooks", "pretooluse.mjs");
+        "node " + resolve(spacedTargetDir, "hooks", "pre-tool-use.mjs");
       const probe = spawnSync(
         "/bin/sh",
         ["-c", `set -- ${buggyForm}; printf "%s\\n" "$#"`],

@@ -7,7 +7,7 @@
  * context. This slice extends the same protection to Codex CLI.
  *
  * Codex MCP wire shape: `mcp__<server>__<tool>` (verified in
- * configs/codex/hooks.json line 5 which already matches `mcp__.*__ctx_execute`
+ * hooks/hooks.json line 5 which already matches `mcp__.*__ctx_execute`
  * style — proving hook tool_name carries the `mcp__` prefix for MCP-namespaced
  * tools). Codex own context-mode tools surface as bare `ctx_execute` AND as
  * `mcp__<server>__ctx_execute` (the existing PRE_TOOL_USE_MATCHER_PATTERN
@@ -57,10 +57,10 @@ describe("CodexAdapter — external MCP routing (#529)", () => {
     expect(preToolUseMatcher).toContain(EXTERNAL_MCP_MATCHER_PATTERN);
   });
 
-  it("configs/codex/hooks.json PreToolUse matcher contains EXTERNAL_MCP_MATCHER_PATTERN", async () => {
+  it("hooks/hooks.json PreToolUse matcher contains EXTERNAL_MCP_MATCHER_PATTERN", async () => {
     const { readFileSync } = await import("node:fs");
     const { resolve } = await import("node:path");
-    const path = resolve(__dirname, "..", "..", "configs", "codex", "hooks.json");
+    const path = resolve(__dirname, "..", "..", "hooks", "hooks.json");
     const parsed = JSON.parse(readFileSync(path, "utf8")) as {
       hooks: { PreToolUse: Array<{ matcher: string }> };
     };

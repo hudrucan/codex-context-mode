@@ -13,7 +13,7 @@ import { loadDatabase, applyWALPragmas, closeDB, cleanOrphanedWALFiles, withRetr
 import type { PreparedStatement } from "./db-base.js";
 import { readFileSync, readdirSync, unlinkSync, existsSync, statSync, openSync, fstatSync, closeSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { tmpdir } from "node:os";
+import { runtimeCacheDir, assertMutablePath } from "./runtime-paths.js";
 import { join } from "node:path";
 import { walkDirectoryDetailed, type WalkOptions } from "./store-directory.js";
 
@@ -172,33 +172,6 @@ const WHITESPACE_BREAK_RATIO = 0.5;
 // ─────────────────────────────────────────────────────────
 // ContentStore
 // ─────────────────────────────────────────────────────────
-
-/**
- * Remove stale DB files from previous sessions whose processes no longer exist.
- */
-export function cleanupStaleDBs(): number {
-  const dir = tmpdir();
-  let cleaned = 0;
-  try {
-    const files = readdirSync(dir);
-    for (const file of files) {
-      const match = file.match(/^context-mode-(\d+)\.db$/);
-      if (!match) continue;
-      const pid = parseInt(match[1], 10);
-      if (pid === process.pid) continue;
-      try {
-        process.kill(pid, 0);
-      } catch {
-        const base = join(dir, file);
-        for (const suffix of ["", "-wal", "-shm"]) {
-          try { unlinkSync(base + suffix); } catch { /* ignore */ }
-        }
-        cleaned++;
-      }
-    }
-  } catch { /* ignore readdir errors */ }
-  return cleaned;
-}
 
 // ── Proximity helpers (pure functions) ──
 
@@ -360,7 +333,8 @@ export class ContentStore {
   constructor(dbPath?: string) {
     const Database = loadDatabase();
     this.#dbPath =
-      dbPath ?? join(tmpdir(), `context-mode-${process.pid}.db`);
+      dbPath ?? join(runtimeCacheDir(), `content-${process.pid}.db`);
+    if (this.#dbPath !== ":memory:") assertMutablePath(this.#dbPath);
     cleanOrphanedWALFiles(this.#dbPath);
     let db: DatabaseInstance;
     try {

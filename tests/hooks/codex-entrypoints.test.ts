@@ -12,7 +12,7 @@ let project: string;
 let shell: string;
 
 beforeAll(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), "codex offline hooks ")));
+  root = realpathSync.native(mkdtempSync(join(tmpdir(), "codex offline hooks ")));
   fork = join(root, "fork with spaces");
   project = join(root, "workspace with spaces");
   mkdirSync(fork);
@@ -28,7 +28,7 @@ beforeAll(() => {
 
 afterAll(() => {
   if (!root) return;
-  expect(resolve(root).startsWith(realpathSync(tmpdir()) + sep)).toBe(true);
+  expect(resolve(root).startsWith(realpathSync.native(tmpdir()) + sep)).toBe(true);
   expect(root).toContain("codex offline hooks ");
   rmSync(root, { recursive: true, force: true });
 });
@@ -63,27 +63,27 @@ function output(result: ReturnType<typeof run>, event: string) {
 
 describe("offline Codex hook entrypoints", () => {
   it.each(events)("runs %s directly and through CLI with identical stdin and isolated storage", event => {
-    const direct = run([join(fork, `hooks/codex/${event.toLowerCase()}.mjs`)]);
-    const dispatch = run([join(fork, "cli.bundle.mjs"), "hook", "codex", event.toLowerCase()]);
+    const direct = run([join(fork, `hooks/codex/${event.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase()}.mjs`)]);
+    const dispatch = run([join(fork, "cli.bundle.mjs"), "hook", "codex", event.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase()]);
     expect(output(dispatch, event)).toEqual(output(direct, event));
   });
 });
 
 describe.skipIf(process.platform !== "win32")("PowerShell hook commands with Windows spaces", () => {
   it.each(events)("executes the shipped direct %s command", event => {
-    const examples = JSON.parse(readFileSync(join(repo, "configs/codex/hooks.json"), "utf8"));
-    const command = examples.hooks[event][0].hooks[0].command.replace("/absolute/path/to/codex-context-mode", fork.replace(/\\/g, "/"));
+    const examples = JSON.parse(readFileSync(join(repo, "hooks/hooks.json"), "utf8"));
+    const command = examples.hooks[event][0].hooks[0].command.replace("${PLUGIN_ROOT}", fork.replace(/\\/g, "/"));
     output(run(["-NoProfile", "-NonInteractive", "-Command", command], shell), event);
   });
 
   it.each(["direct", "cli"])("supports an absolute pinned Node via & for the %s entrypoint", mode => {
-    const target = mode === "cli" ? join(fork, "cli.bundle.mjs") : join(fork, "hooks/codex/pretooluse.mjs");
-    const command = `& "${process.execPath}" "${target}"${mode === "cli" ? " hook codex pretooluse" : ""}`;
+    const target = mode === "cli" ? join(fork, "cli.bundle.mjs") : join(fork, "hooks/codex/pre-tool-use.mjs");
+    const command = `& "${process.execPath}" "${target}"${mode === "cli" ? " hook codex pre-tool-use" : ""}`;
     output(run(["-NoProfile", "-NonInteractive", "-Command", command], shell), "PreToolUse");
   });
 
   it("exposes the original parser error before Node when a quoted executable lacks &", () => {
-    const command = `"${process.execPath}" "${join(fork, "cli.bundle.mjs")}" hook codex pretooluse`;
+    const command = `"${process.execPath}" "${join(fork, "cli.bundle.mjs")}" hook codex pre-tool-use`;
     const result = run(["-NoProfile", "-NonInteractive", "-Command", command], shell);
     expect(result.status).not.toBe(0);
     expect(result.stdout).toBe("");

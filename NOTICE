@@ -1,0 +1,5 @@
+codex-context-mode is a Codex-specific fork of context-mode.
+Original project: https://github.com/mksglu/context-mode
+Original author: Mert Koseoğlu and upstream contributors.
+Fork: https://github.com/hudrucan/codex-context-mode
+The original Elastic License 2.0 terms remain in LICENSE.

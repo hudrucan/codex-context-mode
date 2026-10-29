@@ -1,6 +1,6 @@
 /**
  * Shared routing block for context-mode hooks.
- * Single source of truth — imported by pretooluse.mjs and sessionstart.mjs.
+ * Single source of truth — imported by pre-tool-use.mjs and session-start.mjs.
  *
  * Factory functions accept a tool namer `t(bareTool) => platformSpecificName`
  * so each platform gets correct tool names in guidance messages.

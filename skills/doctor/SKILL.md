@@ -1,9 +1,8 @@
 ---
-name: ctx-doctor
+name: doctor
 description: |
   Run Codex context-mode diagnostics: runtimes, hooks, FTS5 and local installation.
-  Self-upgrade is disabled in this fork.
-  Trigger: /context-mode:ctx-doctor
+  Trigger: /codex-context-mode:doctor
 user-invocable: true
 ---
 
@@ -12,7 +11,7 @@ user-invocable: true
 ## Instructions
 
 1. Call the `ctx_doctor` MCP tool and display the actual report. Keep its `[OK]`, `[FAIL]` and `[WARN]` statuses; do not turn an unrun check into PASS.
-2. **Fallback** only when the MCP tool is unavailable: derive the plugin root from this skill's location (remove `skills/ctx-doctor`). Invoke Node on that root's `cli.bundle.mjs`, or `build/cli.js` if the bundle is absent. Use an argument array rather than shell interpolation:
+2. **Fallback** only when the MCP tool is unavailable: derive the plugin root from this skill's location (remove `skills/doctor`). Invoke Node on that root's `cli.bundle.mjs`, or `build/cli.js` if the bundle is absent. Use an argument array rather than shell interpolation:
 
 ```javascript
 const {existsSync} = require("node:fs");

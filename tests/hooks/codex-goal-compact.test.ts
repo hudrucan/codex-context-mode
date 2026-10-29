@@ -8,9 +8,9 @@ import { fileURLToPath } from "node:url";
 import { loadDatabase } from "../../src/db-base.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CODEX_USER_PROMPT_PATH = join(__dirname, "..", "..", "hooks", "codex", "userpromptsubmit.mjs");
-const CODEX_PRECOMPACT_PATH = join(__dirname, "..", "..", "hooks", "codex", "precompact.mjs");
-const CODEX_SESSIONSTART_PATH = join(__dirname, "..", "..", "hooks", "codex", "sessionstart.mjs");
+const CODEX_USER_PROMPT_PATH = join(__dirname, "..", "..", "hooks", "codex", "user-prompt-submit.mjs");
+const CODEX_PRECOMPACT_PATH = join(__dirname, "..", "..", "hooks", "codex", "pre-compact.mjs");
+const CODEX_SESSIONSTART_PATH = join(__dirname, "..", "..", "hooks", "codex", "session-start.mjs");
 
 function runHook(path: string, input: Record<string, unknown>, env: Record<string, string>) {
   return spawnSync("node", [path], {
@@ -66,12 +66,12 @@ describe("hooks/codex — /goal survives compact resume context", () => {
     rmSync(fakeProject, { recursive: true, force: true });
   });
 
-  test.each(["default", "CONTEXT_MODE_DIR", "CONTEXT_MODE_DATA_DIR"])("restores a Codex slash /goal directive after PreCompact with %s", (override) => {
+  test.each(["default", "CONTEXT_MODE_DIR", "CODEX_CONTEXT_MODE_HOME"])("restores a Codex slash /goal directive after PreCompact with %s", (override) => {
     const storage = join(fakeHome, "storage");
     if (override !== "default") env[override] = storage;
     const sessionsDir = override === "CONTEXT_MODE_DIR"
       ? join(storage, "sessions")
-      : join(override === "CONTEXT_MODE_DATA_DIR" ? storage : codexHome, "context-mode", "sessions");
+      : join(override === "CODEX_CONTEXT_MODE_HOME" ? storage : join(fakeHome, ".codex-context-mode"), "data", "sessions");
     const sessionId = "codex-goal-compact-session";
     const objective = "keep codex slash goal alive through compact";
     const baseInput = {
@@ -90,7 +90,7 @@ describe("hooks/codex — /goal survives compact resume context", () => {
     expect(readGoalRows(sessionsDir)).toEqual([
       expect.objectContaining({ data: objective, priority: 4 }),
     ]);
-    if (override !== "default") expect(existsSync(join(codexHome, "context-mode", "sessions"))).toBe(false);
+    if (override !== "default") expect(existsSync(join(fakeHome, ".codex-context-mode", "data", "sessions"))).toBe(false);
 
     const compactResult = runHook(CODEX_PRECOMPACT_PATH, baseInput, env);
     expect(compactResult.status, compactResult.stderr || compactResult.stdout).toBe(0);

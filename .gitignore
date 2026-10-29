@@ -20,10 +20,6 @@ AGENTS.md
 context-mode-guidance-*/
 .claude/worktrees/
 
-# .mcp.json is local-only. For standalone Codex development, adapt
-# .mcp.json.codex.example with an absolute launcher path.
-# The Codex plugin uses the tracked .codex-plugin/mcp.json instead.
-.mcp.json
 .claude-worktrees/
 .vibetree/
 .cw/
@@ -32,3 +28,5 @@ context-mode-guidance-*/
 tools/pricing/litellm-catalog.json
 /.cocoindex_code/
 /.kilo/
+!hooks/codex-usage.bundle.mjs
+/dist/

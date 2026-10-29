@@ -1,3 +1,4 @@
+import { runtimePaths } from "../../src/runtime-paths.js";
 import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll } from "vitest";
 import { spawn } from "node:child_process";
 import {
@@ -1007,14 +1008,14 @@ describe("mcp-ready: contract", () => {
       }
     });
 
-    it("returns os.tmpdir() on win32", () => {
+    it("uses the external runtime cache on win32", () => {
       Object.defineProperty(process, "platform", { value: "win32", configurable: true });
-      expect(sentinelDir()).toBe(tmpdir());
+      expect(sentinelDir()).toBe(runtimePaths().temporary);
     });
 
-    it("returns /tmp on non-win32", () => {
+    it("uses the external runtime cache on non-win32", () => {
       Object.defineProperty(process, "platform", { value: "linux", configurable: true });
-      expect(sentinelDir()).toBe("/tmp");
+      expect(sentinelDir()).toBe(runtimePaths().temporary);
     });
   });
 
@@ -1241,7 +1242,7 @@ async function spawnPreToolUseHook(
 ): Promise<{ status: number | null; stdout: string; parsed: any }> {
   const { spawnSync } = await import("node:child_process");
   const repoRoot = resolve(SLICE4_DIRNAME, "..", "..");
-  const r = spawnSync(process.execPath, ["hooks/pretooluse.mjs"], {
+  const r = spawnSync(process.execPath, ["hooks/pre-tool-use.mjs"], {
     cwd: repoRoot,
     input: JSON.stringify(input),
     encoding: "utf-8",

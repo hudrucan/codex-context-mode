@@ -8,10 +8,10 @@ import { fileURLToPath } from "node:url";
 import { loadDatabase } from "../../src/db-base.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CODEX_SESSIONSTART_PATH = join(__dirname, "..", "..", "hooks", "codex", "sessionstart.mjs");
+const CODEX_SESSIONSTART_PATH = join(__dirname, "..", "..", "hooks", "codex", "session-start.mjs");
 
 function readRuleRows(codexHome: string) {
-  const sessionDir = join(codexHome, "context-mode", "sessions");
+  const sessionDir = join(dirname(codexHome), ".codex-context-mode", "data", "sessions");
   const dbFiles = readdirSync(sessionDir).filter((file) => file.endsWith(".db"));
   const Database = loadDatabase();
   const rows: Array<{ type: string; data: string }> = [];
@@ -32,7 +32,7 @@ function readRuleRows(codexHome: string) {
   return rows;
 }
 
-describe("hooks/codex/sessionstart.mjs — rule capture", () => {
+describe("hooks/codex/session-start.mjs — rule capture", () => {
   let fakeHome: string;
   let fakeProject: string;
   let codexHome: string;

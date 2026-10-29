@@ -1,11 +1,11 @@
 ---
-name: ctx-stats
+name: stats
 description: |
   Show how much context window context-mode saved this session.
   Displays token consumption, context savings ratio, and per-tool breakdown.
   Read-only — shows stats only, no reset capability.
   To wipe the knowledge base entirely, use ctx_purge instead.
-  Trigger: /context-mode:ctx-stats
+  Trigger: /codex-context-mode:stats
 user-invocable: true
 ---
 
@@ -23,4 +23,4 @@ Show context savings for the current session.
 
 ## Purge
 
-- **`ctx_purge(confirm: true)`** — Permanently deletes all indexed content from the knowledge base. Use `/context-mode:ctx-purge` for this.
+- **`ctx_purge(confirm: true)`** — Permanently deletes all indexed content from the knowledge base. Use `/codex-context-mode:purge` for this.

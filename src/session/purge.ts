@@ -87,18 +87,6 @@ export interface PurgeOpts {
    */
   contentDir?: string;
   /**
-   * Legacy shared content directory at `~/.context-mode/content`. When
-   * omitted, the legacy content sweep is skipped.
-   */
-  legacyContentDir?: string;
-  /**
-   * Hash used to locate the legacy shared content DB. Required when
-   * `legacyContentDir` is provided. Computed by the caller because the
-   * legacy code-path uses a different hash function than the canonical
-   * session DB hash.
-   */
-  contentHash?: string;
-  /**
    * Issue #520 — scoped purge.
    *
    *  - `"project"` (default when omitted for back-compat callers that
@@ -176,7 +164,7 @@ function tryUnlinkSqliteTriple(path: string, wipedPaths: string[]): boolean {
  * without `contentHash`), which is a programmer bug not a runtime concern.
  */
 export function purgeSession(opts: PurgeOpts): PurgeResult {
-  const { projectDir, sessionsDir, storePath, contentDir, legacyContentDir, contentHash, sessionId, scope } = opts;
+  const { projectDir, sessionsDir, storePath, contentDir, sessionId, scope } = opts;
   const deleted: string[] = [];
   const wipedPaths: string[] = [];
 
@@ -299,17 +287,6 @@ export function purgeSession(opts: PurgeOpts): PurgeResult {
     }
   }
   if (storeFound) deleted.push("knowledge base (FTS5)");
-
-  // ── 2. Legacy shared content DB at ~/.context-mode/content/<hash>.db.
-  // Same reasoning as (1) — single hash, legacy code-path only.
-  if (legacyContentDir) {
-    if (!contentHash) {
-      throw new TypeError("purgeSession: contentHash is required when legacyContentDir is provided");
-    }
-    const legacyPath = join(legacyContentDir, `${contentHash}.db`);
-    tryUnlinkSqliteTriple(legacyPath, wipedPaths);
-    // No user-facing label — this is a silent legacy cleanup.
-  }
 
   // ── 3. Session-events kinds at BOTH canonical AND legacy hashes. ─────
   // This is the bug fix: the prior handler only dual-hashed the .db file

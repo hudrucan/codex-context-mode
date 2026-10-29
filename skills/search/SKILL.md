@@ -1,9 +1,9 @@
 ---
-name: ctx-search
+name: search
 description: |
   Search context-mode's persistent FTS5 knowledge base for previously indexed
   local project content, documentation, or session memory.
-  Trigger: /context-mode:ctx-search
+  Trigger: /codex-context-mode:search
 user-invocable: true
 ---
 
@@ -32,6 +32,6 @@ ctx_search({
 node "/absolute/path/to/codex-context-mode/cli.bundle.mjs" search "authentication middleware" --source project:<name> --limit 5
 ```
 
-6. If the index is empty, tell the user to run `/context-mode:ctx-index` or the local CLI index command first.
+6. If the index is empty, tell the user to run `/codex-context-mode:index` or the local CLI index command first.
 
 Use the actual reviewed plugin root; never fall back to a bare global package command or an upstream install.

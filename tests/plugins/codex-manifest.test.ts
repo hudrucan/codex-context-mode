@@ -1,188 +1,38 @@
-/**
- * Codex plugin manifest tests — guards the shipped `.codex-plugin/*` files
- * against accidental drift that would silently break Codex CLI marketplace
- * installs.
- *
- * Why these assertions matter (verified against codex-rs source @ 2026-05-11):
- *
- * - Codex's plugin loader deserializes `.codex-plugin/mcp.json` via
- *   `PluginMcpServersFile` which is `#[serde(rename_all = "camelCase")]`
- *   (codex-rs/core-plugins/src/loader.rs:101-104). The JSON key MUST be
- *   `mcpServers` (camelCase). A snake_case `mcp_servers` key falls through
- *   to the `ServerMap` fallback and registers a single bogus server literally
- *   named "mcp_servers" — silent breakage with no warning.
- *
- * - Codex performs ZERO variable substitution on `args` — the stdio launcher
- *   passes them verbatim to `Command::new(...).args(args)`
- *   (codex-rs/rmcp-client/src/stdio_server_launcher.rs:253-260). So
- *   `${CODEX_PLUGIN_ROOT}` would be passed literally to Node, which would
- *   then fail to load. (`CODEX_PLUGIN_ROOT` is also not a real env var —
- *   it only appears in TUI display strings.)
- *
- * - Codex DOES auto-resolve a relative `cwd` against the plugin root in
- *   `normalize_plugin_mcp_server_value` (codex-rs/core-plugins/src/loader.rs:1067-1071).
- *   So `cwd: "."` becomes `<plugin_root>` at spawn time, and a relative
- *   `args: ["./start.mjs"]` then resolves correctly when Node loads it.
- */
-
 import { describe, it, expect } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
-
-const REPO_ROOT = resolve(__dirname, "..", "..");
-
-function readJson(relPath: string): Record<string, unknown> {
-  const raw = readFileSync(resolve(REPO_ROOT, relPath), "utf8");
-  return JSON.parse(raw) as Record<string, unknown>;
-}
-
-describe(".codex-plugin/mcp.json", () => {
-  const mcp = readJson(".codex-plugin/mcp.json");
-
-  it("uses camelCase `mcpServers` (Codex deserializes via #[serde(rename_all = camelCase)])", () => {
-    expect(mcp).toHaveProperty("mcpServers");
-    expect(mcp).not.toHaveProperty("mcp_servers");
+const root = resolve(import.meta.dirname, "../..");
+const json = (p: string) => JSON.parse(readFileSync(resolve(root, p), "utf8"));
+describe("single Codex plugin contract", () => {
+  it("has canonical identity and one host-policy-neutral local MCP", () => {
+    const plugin = json(".codex-plugin/plugin.json"), pkg = json("package.json"), mcp = json(".mcp.json");
+    expect(plugin.name).toBe("codex-context-mode"); expect(pkg.name).toBe(plugin.name);
+    expect(plugin.version).toBe(pkg.version); expect(plugin.mcpServers).toBe("./.mcp.json");
+    expect(plugin.hooks).toBe("./hooks/hooks.json"); expect(plugin.skills).toBe("./skills/");
+    expect(Object.keys(mcp.mcpServers)).toEqual(["codex-context-mode"]);
+    expect(mcp.mcpServers["codex-context-mode"]).toEqual({command: "node", args: ["./start.mjs"], cwd: ".", env: {CONTEXT_MODE_PLATFORM: "codex"}});
+    expect(readdirSync(resolve(root, ".codex-plugin"))).toEqual(["plugin.json"]);
+    expect(pkg.scripts.postinstall).toBeUndefined(); expect(pkg.scripts.setup).toBeUndefined();
   });
-
-  it("declares the context-mode server entry", () => {
-    const servers = mcp.mcpServers as Record<string, unknown>;
-    expect(servers).toBeTypeOf("object");
-    expect(servers).toHaveProperty("context-mode");
+  it("bundles exactly six namespace-local skills", () => {
+    const names = readdirSync(resolve(root, "skills")).filter(n => existsSync(resolve(root, "skills", n, "SKILL.md"))).sort();
+    expect(names).toEqual(["doctor", "index", "main", "purge", "search", "stats"]);
+    for (const name of names) expect(readFileSync(resolve(root, "skills", name, "SKILL.md"), "utf8")).toMatch(new RegExp("^name: " + name + "$", "m"));
   });
-
-  it("launches via `node` with relative `./start.mjs`", () => {
-    const servers = mcp.mcpServers as Record<string, { command: string; args: string[] }>;
-    const entry = servers["context-mode"];
-    expect(entry.command).toBe("node");
-    expect(entry.args).toEqual(["./start.mjs"]);
+  it("keeps PascalCase events and six safe kebab-case hook commands", () => {
+    const hooks = json("hooks/hooks.json").hooks;
+    const names = {PreToolUse:"pre-tool-use",PostToolUse:"post-tool-use",SessionStart:"session-start",PreCompact:"pre-compact",UserPromptSubmit:"user-prompt-submit",Stop:"stop"};
+    expect(Object.keys(hooks).sort()).toEqual(Object.keys(names).sort());
+    for (const [event, file] of Object.entries(names)) {
+      expect(hooks[event]).toHaveLength(1); expect(hooks[event][0].hooks).toHaveLength(1);
+      expect(hooks[event][0].hooks[0].command).toBe('node "${PLUGIN_ROOT}/hooks/codex/' + file + '.mjs"');
+      expect(existsSync(resolve(root, "hooks/codex/" + file + ".mjs"))).toBe(true);
+    }
+    expect(hooks.PreToolUse[0].matcher).toContain("read_file");
   });
-
-  it("sets `cwd: \".\"` so Codex resolves it to the plugin root at spawn", () => {
-    // Codex normalizes relative cwd → plugin_root.join(cwd). With cwd="."
-    // the spawned `node ./start.mjs` resolves correctly inside the
-    // installed plugin directory.
-    const servers = mcp.mcpServers as Record<string, { cwd?: string }>;
-    const entry = servers["context-mode"];
-    expect(entry.cwd).toBe(".");
-  });
-
-  it("sets CONTEXT_MODE_PLATFORM=codex for the MCP server process", () => {
-    // Codex hook wrappers already set this before loading shared hook code.
-    // The MCP server needs the same signal so storage and doctor output do
-    // not fall back to ~/.claude on machines that have both agents installed.
-    const servers = mcp.mcpServers as Record<string, { env?: Record<string, string> }>;
-    const entry = servers["context-mode"];
-    expect(entry.env?.CONTEXT_MODE_PLATFORM).toBe("codex");
-  });
-
-  it("does NOT use `${CODEX_PLUGIN_ROOT}` placeholders (no var expansion happens)", () => {
-    const raw = readFileSync(resolve(REPO_ROOT, ".codex-plugin/mcp.json"), "utf8");
-    expect(raw).not.toMatch(/\$\{[^}]*PLUGIN_ROOT[^}]*\}/);
+  it("preserves attribution and excludes separate legacy installers", () => {
+    expect(json("package.json").license).toBe("Elastic-2.0");
+    expect(readFileSync(resolve(root, "NOTICE"), "utf8")).toContain("Mert");
+    for (const p of ["configs/codex/hooks.json", "configs/codex/config.toml", "scripts/postinstall.mjs", "hooks/ensure-deps.mjs"]) expect(existsSync(resolve(root, p))).toBe(false);
   });
 });
-
-describe(".codex-plugin/plugin.json", () => {
-  const manifest = readJson(".codex-plugin/plugin.json");
-  const pkg = readJson("package.json");
-
-  it("references the sibling mcp.json via the camelCase `mcpServers` field", () => {
-    // Codex's manifest schema (codex-rs/core-plugins/src/manifest.rs:28)
-    // deserializes `mcpServers` as `Option<String>` — a path to the mcp file.
-    expect(manifest.mcpServers).toBe("./.codex-plugin/mcp.json");
-  });
-
-  it("version matches package.json (kept in lockstep by version-sync)", () => {
-    expect(manifest.version).toBe(pkg.version);
-  });
-
-  it("keeps identity and attribution while describing the Codex-only local fork", () => {
-    expect(manifest.name).toBe("context-mode");
-    expect(pkg.name).toBe("context-mode");
-    expect(manifest.description).toBe(pkg.description);
-    expect(String(manifest.description)).toContain("Codex-only");
-    expect(String(manifest.description)).toContain("Self-upgrade is disabled");
-    expect(pkg.engines).toEqual({ node: ">=22.5.0" });
-    expect(pkg.author).toBe("Mert Koseoğlu");
-    expect(manifest.author).toMatchObject({ name: pkg.author });
-    for (const metadata of [pkg, manifest]) {
-      expect(metadata.license).toBe("Elastic-2.0");
-      expect(metadata.keywords).not.toEqual(expect.arrayContaining(["claude-code"]));
-      expect(metadata.keywords).toContain("codex-cli");
-    }
-  });
-});
-
-describe("standalone local-fork examples", () => {
-  it("pins the launcher rather than resolving an upstream global command", () => {
-    const toml = readFileSync(resolve(REPO_ROOT, "configs/codex/config.toml"), "utf8");
-    const section = toml.split("[mcp_servers.context-mode]")[1]?.split("[mcp_servers.context-mode.env]")[0];
-    expect(section).toContain('command = "node"');
-    expect(section).toContain('args = ["/absolute/path/to/codex-context-mode/start.mjs"]');
-    expect(section).not.toContain('command = "context-mode"');
-    const json = readJson(".mcp.json.codex.example") as {
-      mcpServers: Record<string, { command: string; args: string[] }>;
-    };
-    expect(json.mcpServers["context-mode"]).toMatchObject({
-      command: "node", args: ["/absolute/path/to/codex-context-mode/start.mjs"],
-    });
-  });
-
-  it("pins every manual hook to the same direct entrypoints as the plugin", () => {
-    const manual = readJson("configs/codex/hooks.json") as {
-      hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
-    };
-    const plugin = readJson(".codex-plugin/hooks.json") as typeof manual;
-    expect(Object.keys(manual.hooks).sort()).toEqual(Object.keys(plugin.hooks).sort());
-    for (const [event, groups] of Object.entries(manual.hooks)) {
-      for (const group of groups) for (const hook of group.hooks) {
-        expect(hook.command).toBe(`node "/absolute/path/to/codex-context-mode/hooks/codex/${event.toLowerCase()}.mjs"`);
-        expect(hook.command).toBe(plugin.hooks[event][0].hooks[0].command.replace("${PLUGIN_ROOT}", "/absolute/path/to/codex-context-mode"));
-        expect(existsSync(resolve(REPO_ROOT, `hooks/codex/${event.toLowerCase()}.mjs`))).toBe(true);
-      }
-    }
-  });
-});
-
-describe(".codex-plugin/hooks.json", () => {
-  const hooksPath = resolve(REPO_ROOT, ".codex-plugin/hooks.json");
-  const hooks = readJson(".codex-plugin/hooks.json") as {
-    hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
-  };
-
-  it("ships the Codex plugin hooks manifest", () => {
-    expect(existsSync(hooksPath)).toBe(true);
-  });
-
-  it("uses simple plugin-root hook script commands", () => {
-    for (const groups of Object.values(hooks.hooks)) {
-      const command = groups[0]?.hooks[0]?.command ?? "";
-      expect(command).toContain('node "${PLUGIN_ROOT}/hooks/codex/');
-    }
-  });
-
-  it("sets CONTEXT_MODE_PLATFORM=codex in hook wrapper modules", () => {
-    const platformSource = readFileSync(resolve(REPO_ROOT, "hooks/codex/platform.mjs"), "utf8");
-    expect(platformSource).toContain('process.env.CONTEXT_MODE_PLATFORM = "codex";');
-
-    for (const groups of Object.values(hooks.hooks)) {
-      const command = groups[0]?.hooks[0]?.command ?? "";
-      const match = command.match(/\$\{PLUGIN_ROOT\}\/(hooks\/codex\/[^"]+\.mjs)/);
-      expect(match, `expected codex hook script path in ${command}`).not.toBeNull();
-
-      const hookSource = readFileSync(resolve(REPO_ROOT, match![1]), "utf8");
-      const platformImport = hookSource.indexOf('import "./platform.mjs";');
-      const firstSharedImport = hookSource.indexOf('import "../');
-      expect(platformImport).toBeGreaterThanOrEqual(0);
-      expect(firstSharedImport).toBeGreaterThan(platformImport);
-    }
-  });
-});
-
-// `.codex-plugin/marketplace.json` was intentionally removed — Codex CLI's
-// MARKETPLACE_MANIFEST_RELATIVE_PATHS at
-// refs/platforms/codex/codex-rs/core-plugins/src/marketplace.rs:21 lists
-// only `.agents/plugins/marketplace.json` and `.claude-plugin/marketplace.json`.
-// Shipping under `.codex-plugin/` was dead weight that never resolved a
-// plugin and historically misled contributors. The Codex-discoverable
-// marketplace now lives at `.agents/plugins/marketplace.json`, and its
-// layout contract is pinned in `tests/codex/marketplace-layout.test.ts`.

@@ -11,7 +11,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { z } from "zod";
 import { PolyglotExecutor } from "./executor.js";
 import { runPool, type PoolJob } from "./runPool.js";
-import { ContentStore, cleanupStaleDBs, type SearchResult, type IndexResult } from "./store.js";
+import { ContentStore, type SearchResult, type IndexResult } from "./store.js";
 import { composeFetchCacheKey } from "./fetch-cache.js";
 import {
   readBashPolicies,
@@ -69,6 +69,7 @@ import { parseCodexContextModePluginRoot } from "./adapters/codex/index.js";
 import { getHookScriptPaths } from "./util/hook-config.js";
 import { resolveCodexRequestContext, resolveProjectDir } from "./util/project-dir.js";
 import { loadDatabase } from "./db-base.js";
+import { runtimeCacheDir } from "./runtime-paths.js";
 import { AnalyticsEngine, formatReport, getConversationStats, getContentBytesAllSessions, getConversationWindowStats, getLifetimeStats, getRealBytesStats, pricePerToken } from "./session/analytics.js";
 const __pkg_dir = dirname(fileURLToPath(import.meta.url));
 const VERSION: string = (() => {
@@ -85,34 +86,8 @@ function getPackageRoot(): string {
   return existsSync(resolve(__pkg_dir, "package.json")) ? __pkg_dir : dirname(__pkg_dir);
 }
 
-function resolveCodexRuntimePluginRoot(fallbackRoot: string): string {
-  try {
-    const probe = process.platform === "win32"
-      ? spawnSync("cmd.exe", ["/d", "/s", "/c", "codex plugin list"], {
-        encoding: "utf-8",
-        stdio: ["ignore", "pipe", "ignore"],
-        timeout: 5000,
-      })
-      : spawnSync("codex", ["plugin", "list"], {
-        encoding: "utf-8",
-        stdio: ["ignore", "pipe", "ignore"],
-        timeout: 5000,
-      });
-    if (probe.status !== 0) return fallbackRoot;
-    const runtimeRoot = parseCodexContextModePluginRoot(String(probe.stdout));
-    if (runtimeRoot && existsSync(resolve(runtimeRoot, ".codex-plugin", "hooks.json"))) {
-      return runtimeRoot;
-    }
-  } catch {
-    // Best effort only. Non-Codex hosts and older Codex builds may not expose
-    // plugin list; keep the package-root fallback for those environments.
-  }
-  return fallbackRoot;
-}
+function getRuntimeAwarePackageRoot(): string { return getPackageRoot(); }
 
-function getRuntimeAwarePackageRoot(): string {
-  return resolveCodexRuntimePluginRoot(getPackageRoot());
-}
 
 // Prevent silent MCP server death from unhandled async errors.
 //
@@ -137,7 +112,7 @@ if (process.env.CONTEXT_MODE_EMBEDDED_PLUGIN_TOOLS !== "1") {
 const runtimes = detectRuntimes();
 const available = getAvailableLanguages(runtimes);
 export const server = new McpServer({
-  name: "context-mode",
+  name: "codex-context-mode",
   version: VERSION,
 });
 
@@ -291,7 +266,7 @@ const executor = new PolyglotExecutor({
 // NODE_OPTIONS is denied by the executor's #buildSafeEnv (security).
 // Instead, we inject it as an inline shell env prefix in each batch command.
 // This temp file is loaded via --require when batch commands spawn Node processes.
-const CM_FS_PRELOAD = join(tmpdir(), `cm-fs-preload-${process.pid}.js`);
+const CM_FS_PRELOAD = join(runtimeCacheDir(), `cm-fs-preload-${process.pid}.js`);
 writeFileSync(
   CM_FS_PRELOAD,
   `(function(){var __cm_fs=0;process.on('exit',function(){if(__cm_fs>0)try{process.stderr.write('__CM_FS__:'+__cm_fs+'\\n')}catch(e){}});try{var f=require('fs');var ors=f.readFileSync;f.readFileSync=function(){var r=ors.apply(this,arguments);if(Buffer.isBuffer(r))__cm_fs+=r.length;else if(typeof r==='string')__cm_fs+=Buffer.byteLength(r);return r;};}catch(e){}})();\n`,
@@ -492,8 +467,6 @@ function getStore(): ContentStore {
       store.cleanupStaleSources(14);
     } catch { /* best-effort */ }
 
-    // Also clean old PID-based DBs from migration
-    cleanupStaleDBs();
   }
   maybeIndexSessionEvents(store);
   return store;
@@ -2445,16 +2418,14 @@ let _gfmPluginPath: string | null = null;
 
 function resolveTurndownPath(): string {
   if (!_turndownPath) {
-    const require = createRequire(import.meta.url);
-    _turndownPath = require.resolve("turndown");
+    _turndownPath = join(getPackageRoot(), "html-transform.bundle.cjs");
   }
   return _turndownPath;
 }
 
 function resolveGfmPluginPath(): string {
   if (!_gfmPluginPath) {
-    const require = createRequire(import.meta.url);
-    _gfmPluginPath = require.resolve("turndown-plugin-gfm");
+    _gfmPluginPath = join(getPackageRoot(), "html-transform.bundle.cjs");
   }
   return _gfmPluginPath;
 }
@@ -2496,7 +2467,7 @@ export function buildFetchCode(url: string, outputPath: string): string {
       : `var ${classifyIpFnName} = ${classifyIpInner};\nvar classifyIp = ${classifyIpFnName};`;
   const strictMode = process.env.CTX_FETCH_STRICT === "1";
   return `
-const TurndownService = require(${turndownPath});
+const { TurndownService } = require(${turndownPath});
 const { gfm } = require(${gfmPath});
 const fs = require('fs');
 const dns = require('no' + 'de:dns');
@@ -2945,7 +2916,7 @@ async function fetchOneUrl(url: string, source: string | undefined, force: boole
     }
   }
 
-  const outputPath = join(tmpdir(), `ctx-fetch-${Date.now()}-${Math.random().toString(36).slice(2)}.dat`);
+  const outputPath = join(runtimeCacheDir(), `ctx-fetch-${Date.now()}-${Math.random().toString(36).slice(2)}.dat`);
   try {
     const fetchCode = buildFetchCode(url, outputPath);
     const result = await executor.execute({
@@ -3885,21 +3856,6 @@ server.registerTool(
   },
 );
 
-// ── ctx-upgrade: upgrade meta-tool ─────────────────────────────────────────
-server.registerTool(
-  "ctx_upgrade",
-  {
-    title: "Self-upgrade Disabled",
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    description: "Self-upgrade is disabled for this fork. Use an explicitly reviewed local release; no upgrade command is generated.",
-    inputSchema: z.object({}),
-  },
-  async () => trackResponse("ctx_upgrade", {
-    isError: true,
-    content: [{ type: "text", text: "Self-upgrade is disabled for this fork; use an explicitly reviewed local release. No upgrade command was generated." }],
-  }),
-);
-
 // ── ctx-purge: explicit knowledge base wipe ─────────────────────────────────
 //
 // Issue #520 — scoped purge.
@@ -4040,12 +3996,6 @@ EXAMPLE: ctx_purge(confirm: true, scope: "project")`,
       sessionsDir: getSessionDir(),
       storePath: storePathForPurge,
       contentDir,
-      legacyContentDir: join(homedir(), ".context-mode", "content"),
-      // hashProjectDirLegacy mirrors the deployed (≤ v1.0.111) raw-casing
-      // hash that named files under ~/.context-mode/content/. Using the
-      // legacy hash here is correct: that pre-pre-legacy directory was
-      // never migrated and still uses raw casing.
-      contentHash: hashProjectDirLegacy(getProjectDir()),
       scope: effectiveScope,
       sessionId,
     });
@@ -4085,255 +4035,15 @@ EXAMPLE: ctx_purge(confirm: true, scope: "project")`,
   },
 );
 
-// ── ctx_insight process helpers ──────────────────────────────────────────────
-// Cross-platform process helpers used by ctx_insight (below) and the dashboard
-// launcher in cli.ts. All entry points use argv arrays — never `sh -c <string>`
-// — so caller-derived values cannot escape into shell context. See issue #441.
-//
-// `browserOpenArgv` is duplicated as a private 16-LOC copy in cli.ts to avoid
-// pulling server.ts top-level boot side effects into the cli bundle.
-
-export type SpawnSyncFn = (
-  cmd: string,
-  args: readonly string[],
-  opts?: SpawnSyncOptions,
-) => SpawnSyncReturns<string | Buffer>;
-
-export type BrowserOpenResult =
-  | { ok: true; method: string }
-  | { ok: false; method: "none"; reason: string };
-
-export type KillResult = {
-  killedPids: string[];
-  attemptedPids: string[];
-  errors: string[];
-};
-
-// Hard upper bound on every helper-internal spawnSync call. Caps tail-latency
-// when an external binary hangs (xdg-open waiting for an X11 session, lsof
-// stalling on /proc, taskkill blocking on an unresponsive process, etc.) so
-// the MCP tool surfaces a diagnostic instead of blocking the agent loop.
-// 5s is comfortably above the 99th-percentile completion of every command we
-// invoke; anything past that is hung.
-const HELPER_SPAWN_TIMEOUT_MS = 5000;
-
-// Returns the argv attempts for opening `url` on `platform`, in fall-back order.
-// Pure data — no I/O.
-export function browserOpenArgv(
-  url: string,
-  platform: NodeJS.Platform,
-): readonly { cmd: string; args: readonly string[] }[] {
-  if (platform === "darwin") return [{ cmd: "open", args: [url] }];
-  if (platform === "win32") {
-    // `start` is a cmd.exe builtin; the empty title arg ("") prevents the URL
-    // from being consumed as the window title.
-    return [{ cmd: "cmd", args: ["/c", "start", "", url] }];
-  }
-  // linux/bsd: try xdg-open, then sensible-browser (Debian/Ubuntu).
-  return [
-    { cmd: "xdg-open", args: [url] },
-    { cmd: "sensible-browser", args: [url] },
-  ];
-}
-
-// Opens a browser synchronously, waiting for each attempt to complete.
-// Returns a structured result so callers can surface auto-open failures
-// to the user instead of falsely reporting success.
-export function openBrowserSync(
-  url: string,
-  platform: NodeJS.Platform = process.platform,
-  runner: SpawnSyncFn = spawnSync,
-): BrowserOpenResult {
-  const attempts = browserOpenArgv(url, platform);
-  const errors: string[] = [];
-  for (const { cmd, args } of attempts) {
-    try {
-      const r = runner(cmd, args, { stdio: "ignore", timeout: HELPER_SPAWN_TIMEOUT_MS });
-      // Treat signal-kill (status === null) and any non-zero status as failure
-      // so the next fallback fires.
-      if (!r.error && r.status === 0) return { ok: true, method: cmd };
-      const reason = r.error?.message ?? `status=${r.status === null ? "signaled" : r.status}`;
-      errors.push(`${cmd}: ${reason}`);
-    } catch (e) {
-      errors.push(`${cmd}: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
-  return { ok: false, method: "none", reason: errors.join("; ") };
-}
-
-// Kills any process listening on `port`. Returns a structured result so
-// the caller can distinguish between (a) port was free, (b) kill succeeded,
-// (c) kill failed (perms, missing binary, or per-pid failure mid-loop).
-//
-// On Windows the netstat parser is locale-independent: the STATE column
-// ("LISTENING" / "ESTABLISHED" / ...) is translated on non-English Windows
-// (Windows-FR shows "À l'écoute", Windows-DE "ABHÖREN", etc.), but the REMOTE
-// ADDRESS column is not. A listening TCP socket always has remote
-// "0.0.0.0:0" (IPv4) or "[::]:0" (IPv6); a connected one has a real
-// addr:port. We therefore key off the remote column instead of the state
-// string. This also rules out the pre-fix bug where matching only the local
-// port number cross-matched a remote :port from an outbound connection and
-// taskkill'd an unrelated process.
-export function killProcessOnPort(
-  port: number,
-  platform: NodeJS.Platform = process.platform,
-  runner: SpawnSyncFn = spawnSync,
-): KillResult {
-  const result: KillResult = { killedPids: [], attemptedPids: [], errors: [] };
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    result.errors.push(`invalid port: ${port}`);
-    return result;
-  }
-
-  try {
-    if (platform === "win32") {
-      const r = runner("netstat", ["-ano"], {
-        encoding: "utf-8",
-        stdio: ["ignore", "pipe", "ignore"],
-        timeout: HELPER_SPAWN_TIMEOUT_MS,
-      });
-      if (r.error) {
-        result.errors.push(`netstat: ${r.error.message}`);
-        return result;
-      }
-      if (r.status !== 0 || typeof r.stdout !== "string") return result;
-
-      const portSuffix = `:${port}`;
-      const pids = new Set<string>();
-      for (const rawLine of r.stdout.split(/\r?\n/)) {
-        const line = rawLine.trim();
-        if (!line) continue;
-        const tokens = line.split(/\s+/);
-        // netstat -ano LISTENING row (en-US): "TCP  0.0.0.0:4747  0.0.0.0:0  LISTENING  1234"
-        // The STATE column is locale-translated and may itself contain spaces
-        // (Windows-FR `À l'écoute` splits into two tokens), so we cannot index
-        // STATE by position. PID is always the trailing column; PROTO/LOCAL/
-        // REMOTE are the first three. We anchor on those + a remote-wildcard
-        // check that's locale-independent.
-        if (tokens.length < 5) continue;
-        const proto = tokens[0];
-        const local = tokens[1];
-        const remote = tokens[2];
-        const pid = tokens[tokens.length - 1];
-        if (proto !== "TCP") continue;
-        if (!local.endsWith(portSuffix)) continue;
-        // Listening sockets carry a wildcard remote; anything else is a
-        // connection (and matching it would kill an unrelated process).
-        if (remote !== "0.0.0.0:0" && remote !== "[::]:0") continue;
-        if (!/^\d+$/.test(pid)) continue;
-        pids.add(pid);
-      }
-      for (const pid of pids) {
-        result.attemptedPids.push(pid);
-        try {
-          const k = runner("taskkill", ["/F", "/PID", pid], {
-            stdio: "ignore",
-            timeout: HELPER_SPAWN_TIMEOUT_MS,
-          });
-          if (k.error || k.status !== 0) {
-            result.errors.push(
-              `taskkill ${pid}: ${k.error?.message ?? `status=${k.status}`}`,
-            );
-          } else {
-            result.killedPids.push(pid);
-          }
-        } catch (e) {
-          result.errors.push(`taskkill ${pid}: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      }
-    } else {
-      const r = runner("lsof", ["-ti", `:${port}`], {
-        encoding: "utf-8",
-        stdio: ["ignore", "pipe", "ignore"],
-        timeout: HELPER_SPAWN_TIMEOUT_MS,
-      });
-      if (r.error) {
-        // ENOENT (lsof not installed) is a real diagnostic; surface it.
-        result.errors.push(`lsof: ${r.error.message}`);
-        return result;
-      }
-      // lsof exits 1 with empty stdout when the port is free — not an error.
-      if (r.status !== 0 || typeof r.stdout !== "string") return result;
-
-      const pids = r.stdout.split(/\r?\n/).filter(p => /^\d+$/.test(p));
-      for (const pid of pids) {
-        result.attemptedPids.push(pid);
-        try {
-          const k = runner("kill", [pid], {
-            stdio: "ignore",
-            timeout: HELPER_SPAWN_TIMEOUT_MS,
-          });
-          if (k.error || k.status !== 0) {
-            result.errors.push(
-              `kill ${pid}: ${k.error?.message ?? `status=${k.status}`}`,
-            );
-          } else {
-            result.killedPids.push(pid);
-          }
-        } catch (e) {
-          result.errors.push(`kill ${pid}: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      }
-    }
-  } catch (e) {
-    result.errors.push(e instanceof Error ? e.message : String(e));
-  }
-  return result;
-}
-
-// ── ctx-insight: open the hosted Insight dashboard ───────────────────────────
-// Insight pivoted from a locally-built dashboard to the hosted B2B product at
-// context-mode.com/insight (the landing page is the single source of truth).
-// The tool now simply opens that URL in the user default browser via the same
-// cross-platform helper (openBrowserSync) used elsewhere.
-const INSIGHT_URL = "https://context-mode.com/insight";
-
-server.registerTool(
-  "ctx_insight",
-  {
-    title: "Open Insight Dashboard",
-    // #846: opens a hosted dashboard URL in the browser — an external side
-    // effect (open world), not a read-only query; safe to repeat.
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-    description:
-      "Opens the context-mode Insight dashboard (https://context-mode.com/insight) in your " +
-      "default browser — a dashboard launcher for the hosted analytics layer, not a Q&A engine. " +
-      "Insight surfaces per-engineer productive rate, retry waste, blocker detection, and " +
-      "role-narrowed views for CTO, EM, IC, CISO, FinOps, and DevOps. " +
-      "For natural-language queries over your indexed content, use ctx_search.",
-    inputSchema: z.object({}),
-  },
-  async () => {
-    const open = openBrowserSync(INSIGHT_URL);
-    const text = open.ok
-      ? `Opening Insight in your browser: ${INSIGHT_URL}`
-      : `Could not auto-open your browser (${open.reason}).\nOpen Insight manually: ${INSIGHT_URL}`;
-    return trackResponse("ctx_insight", {
-      content: [{ type: "text" as const, text }],
-    });
-  },
-);
-
 // ─────────────────────────────────────────────────────────
 // Server startup
 // ─────────────────────────────────────────────────────────
 
 async function main() {
-  // Clean up stale DB files from previous sessions
-  const cleaned = cleanupStaleDBs();
-  if (cleaned > 0) {
-    console.error(`Cleaned up ${cleaned} stale DB file(s) from previous sessions`);
-  }
-
   // MCP readiness sentinel path (#230, #347)
   // Uses process.pid (not ppid) — hooks use directory-scan to find any live sentinel.
   // Hardcoded /tmp on Unix to avoid TMPDIR mismatch (#347).
-  const mcpSentinelDir = process.platform === "win32" ? tmpdir() : "/tmp";
+  const mcpSentinelDir = runtimeCacheDir();
   const mcpSentinel = join(mcpSentinelDir, `context-mode-mcp-ready-${process.pid}`);
   // #844: handle to the periodic sentinel refresh timer (started after connect).
   let sentinelRefresh: ReturnType<typeof setInterval> | undefined;

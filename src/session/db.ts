@@ -12,9 +12,10 @@ import type { SessionEvent } from "../types.js";
 import type { ProjectAttribution } from "./project-attribution.js";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { accessSync, constants, existsSync, mkdirSync, realpathSync, renameSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { assertMutablePath, runtimePaths } from "../runtime-paths.js";
 
 // ─────────────────────────────────────────────────────────
 // Storage root resolution
@@ -23,9 +24,9 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 // This lives beside the session DB path helpers because packaged hooks and the
 // statusline already consume `hooks/session-db.bundle.mjs` as their no-build
 // runtime bridge. Keeping the storage resolver here avoids adding a second
-// generated hook bundle just to share CONTEXT_MODE_DIR behavior.
+// generated hook bundle just to share the supported runtime-root override.
 
-const STORAGE_ROOT_ENV = "CONTEXT_MODE_DIR" as const;
+const STORAGE_ROOT_ENV = "CODEX_CONTEXT_MODE_HOME" as const;
 const STORAGE_SESSIONS_SUBDIR = "sessions";
 const STORAGE_CONTENT_SUBDIR = "content";
 
@@ -84,39 +85,7 @@ export interface DefaultSessionDirOptions {
 }
 
 export function resolveDefaultSessionDir(opts: DefaultSessionDirOptions): string {
-  const env = opts.env ?? process.env;
-  const legacyEnvVar = opts.legacySessionDirEnv;
-  const legacy = legacyEnvVar ? env[legacyEnvVar]?.trim() : undefined;
-  if (legacy && legacyEnvVar) {
-    opts.onLegacySessionDir?.(legacyEnvVar, legacy);
-    return legacy;
-  }
-
-  // Hooks and the Codex adapter must share the context-mode storage override.
-  const dataRoot = env.CONTEXT_MODE_DATA_DIR;
-  if (dataRoot && dataRoot.trim() !== "") {
-    return join(resolveConfigDirValue(dataRoot), "context-mode", "sessions");
-  }
-
-  return join(resolveConfigDirForDefaultSession(opts.configDir, opts.configDirEnv, env), "context-mode", "sessions");
-}
-
-function resolveConfigDirForDefaultSession(
-  configDir: string,
-  configDirEnv: string | undefined,
-  env: NodeJS.ProcessEnv,
-): string {
-  const envValue = configDirEnv ? env[configDirEnv] : undefined;
-  if (envValue && envValue.trim() !== "") {
-    return resolveConfigDirValue(envValue.trim());
-  }
-  return resolveConfigDirValue(configDir, homedir());
-}
-
-function resolveConfigDirValue(value: string, baseDir?: string): string {
-  if (value.startsWith("~")) return resolve(homedir(), value.replace(/^~[/\\]?/, ""));
-  if (isAbsolute(value)) return resolve(value);
-  return baseDir ? resolve(baseDir, value) : resolve(value);
+  return runtimePaths(opts.env ?? process.env).sessions;
 }
 
 function invalidStorageOverride(kind: StorageDirectoryKind, path: string, detail: string): StorageDirectoryError {
@@ -156,7 +125,7 @@ function overrideStorageDir(kind: StorageDirectoryKind, subdir: string): Resolve
 
   return {
     kind,
-    path: join(root.root, subdir),
+    path: join(root.root, "data", subdir),
     envVar: STORAGE_ROOT_ENV,
     source: "override",
   };
@@ -181,7 +150,7 @@ export function resolveSessionStorageDir(getDefaultDir: () => string): ResolvedS
   if (root.kind === "override") {
     return {
       kind: "session",
-      path: join(root.root, STORAGE_SESSIONS_SUBDIR),
+      path: join(root.root, "data", STORAGE_SESSIONS_SUBDIR),
       envVar: STORAGE_ROOT_ENV,
       source: "override",
     };
@@ -206,13 +175,13 @@ export function resolveContentStorageDir(getSessionDir: () => string): ResolvedS
 }
 
 export function resolveStatsStorageDir(getDefaultSessionDir: () => string): ResolvedStorageDir {
-  const override = overrideStorageDir("stats", STORAGE_SESSIONS_SUBDIR);
+  const override = overrideStorageDir("stats", "stats");
   if (override) return override;
 
   const session = resolveSessionStorageDir(getDefaultSessionDir);
   return {
     kind: "stats",
-    path: session.path,
+    path: session.path === runtimePaths().sessions ? runtimePaths().stats : session.path,
     envVar: session.envVar,
     source: session.source,
     ignoredEnvVar: session.ignoredEnvVar,
@@ -235,6 +204,7 @@ export function clearStorageDirectoryCheckCacheForTests(): void {
 }
 
 export function ensureWritableStorageDir(dir: ResolvedStorageDir): string {
+  assertMutablePath(dir.path);
   const key = [
     dir.kind,
     dir.path,
@@ -441,70 +411,12 @@ export function hashProjectDirCanonical(projectDir: string): string {
   return createHash("sha256").update(folded).digest("hex").slice(0, 16);
 }
 
-/**
- * Resolve the per-project FTS5 content store DB path, performing a one-shot
- * migration from a legacy raw-casing filename to the canonical one when only
- * the legacy file (with optional `-wal` / `-shm` SQLite sidecars) exists.
- *
- * Same dual-hash safety contract as {@link resolveSessionDbPath}:
- *   - Linux: canonical hash equals legacy hash → no migration attempted.
- *   - Mac/Win: rename legacy → canonical when canonical missing.
- *   - Both exist: leave legacy alone (data-loss safety). Caller picks
- *     canonical; reconciliation is a manual operation.
- *
- * Differs from `resolveSessionDbPath` in two ways:
- *   1. No worktree suffix — the FTS5 store is per-project, not per-worktree.
- *   2. The `-wal` / `-shm` sidecars travel with the main `.db` during
- *      migration so an active SQLite WAL checkpoint is not stranded behind.
- */
-export function resolveContentStorePath(opts: {
-  projectDir: string;
-  contentDir: string;
-}): string {
-  const { projectDir, contentDir } = opts;
-  const canonicalHash = hashProjectDirCanonical(projectDir);
-  const canonicalPath = join(contentDir, `${canonicalHash}.db`);
-  if (existsSync(canonicalPath)) return canonicalPath;
-
-  const legacyHash = hashProjectDirLegacy(projectDir);
-  if (legacyHash === canonicalHash) return canonicalPath; // Linux short-circuit
-
-  const legacyPath = join(contentDir, `${legacyHash}.db`);
-  if (existsSync(legacyPath)) {
-    try {
-      renameSync(legacyPath, canonicalPath);
-      // Travel the SQLite sidecars too so an active WAL is not orphaned.
-      for (const suffix of ["-wal", "-shm"]) {
-        try { renameSync(legacyPath + suffix, canonicalPath + suffix); } catch { /* sidecar may not exist */ }
-      }
-    } catch {
-      // Race or permission issue — caller will create canonicalPath fresh.
-    }
-  }
-  return canonicalPath;
+/** Canonical content DB path; no storage migration. */
+export function resolveContentStorePath(opts: { projectDir: string; contentDir: string }): string {
+  return join(opts.contentDir, hashProjectDirCanonical(opts.projectDir) + ".db");
 }
 
-/**
- * Resolve the SessionDB file path for a project, performing a one-shot
- * migration from legacy raw-casing filenames to canonical ones when only
- * the legacy file exists.
- *
- * Migration rules:
- *   - Linux: `legacyHash === canonicalHash` so the resolver short-circuits;
- *     no migration ever runs (case-sensitive FS, never any drift).
- *   - macOS / Windows: if the canonical path does not exist but a legacy
- *     path does, rename in place. This preserves the user's session
- *     history across the casing-fix upgrade.
- *   - When BOTH paths exist (rare — usually only if the user previously
- *     ran two terminals with different casing) the legacy file is left
- *     UNTOUCHED. The canonical path wins; manual reconciliation needed.
- *     Avoiding the rename here is the data-loss safety guarantee.
- *
- * Worktree separation is preserved: each call only ever migrates the ONE
- * legacy file matching THIS projectDir's hash. Different worktrees have
- * different physical paths → different hashes → different DB files; the
- * migration cannot collapse worktrees.
- */
+/** Canonical project session DB path. */
 export function resolveSessionDbPath(opts: {
   projectDir: string;
   sessionsDir: string;
@@ -512,47 +424,10 @@ export function resolveSessionDbPath(opts: {
   return resolveSessionPath({ ...opts, ext: ".db" });
 }
 
-/**
- * Generalized resolver: same case-fold + one-shot legacy-rename semantics
- * as {@link resolveSessionDbPath}, parameterised on the file extension so
- * the SAME logic powers `.db`, `-events.md`, and `.cleanup` paths.
- *
- * Source of truth for hooks: `hooks/session-helpers.mjs` imports this
- * function from the bundled output (`hooks/session-db.bundle.mjs`) so the
- * JS hooks and the TS server can never drift again on hash, suffix, or
- * migration policy.
- *
- * Optional `suffix` lets the hook layer inject its cross-process cached
- * worktree suffix (the marker-file optimisation that amortises the
- * `git worktree list` cost across hook forks). When omitted, falls back
- * to {@link getWorktreeSuffix} which uses an in-process cache only.
- */
-export function resolveSessionPath(opts: {
-  projectDir: string;
-  sessionsDir: string;
-  ext: string;
-  suffix?: string;
-}): string {
-  const { projectDir, sessionsDir, ext } = opts;
-  const suffix = opts.suffix ?? getWorktreeSuffix(projectDir);
-  const canonicalHash = hashProjectDirCanonical(projectDir);
-  const canonicalPath = join(sessionsDir, `${canonicalHash}${suffix}${ext}`);
-
-  if (existsSync(canonicalPath)) return canonicalPath;
-
-  const legacyHash = hashProjectDirLegacy(projectDir);
-  if (legacyHash === canonicalHash) return canonicalPath; // Linux or already canonical
-
-  const legacyPath = join(sessionsDir, `${legacyHash}${suffix}${ext}`);
-  if (existsSync(legacyPath)) {
-    try {
-      renameSync(legacyPath, canonicalPath);
-    } catch {
-      // Race or permission issue — caller will create canonicalPath on first
-      // write. Better to lose this rename than to throw and break ctx_stats.
-    }
-  }
-  return canonicalPath;
+/** Shared canonical hook/server path; no legacy file moves. */
+export function resolveSessionPath(opts: { projectDir: string; sessionsDir: string; ext: string; suffix?: string }): string {
+  const suffix = opts.suffix ?? getWorktreeSuffix(opts.projectDir);
+  return join(opts.sessionsDir, hashProjectDirCanonical(opts.projectDir) + suffix + opts.ext);
 }
 
 // ─────────────────────────────────────────────────────────

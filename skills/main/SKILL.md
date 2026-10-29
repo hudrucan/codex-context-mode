@@ -1,5 +1,5 @@
 ---
-name: context-mode
+name: main
 description: |
   Use context-mode tools to process large outputs: logs, tests, builds, JSON/API
   responses, dependency analysis, broad repository searches and browser snapshots.
@@ -44,7 +44,7 @@ Hooks provide routing and security only when they are enabled and trusted. Do no
 
 Use MCP tools first. If a utility skill documents a CLI fallback, derive its absolute plugin root and invoke that local `cli.bundle.mjs` with Node. Never resolve an upstream global installation by a bare package command.
 
-Self-upgrade is disabled. `ctx_upgrade` reports that status; do not run a download/install fallback. `ctx_purge` is destructive and requires an explicit session/project scope and confirmation. `ctx_stats` is read-only.
+`ctx_purge` is destructive and requires an explicit session/project scope and confirmation. `ctx_stats` is read-only.
 
 ## Patterns
 

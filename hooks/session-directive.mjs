@@ -11,7 +11,7 @@ import { writeFileSync } from "node:fs";
 // The current Claude Code session_id persists across `--continue` legs, so the
 // events array can carry rows written in a PRIOR leg. The last `session_start`
 // lifecycle event (emitted by the prior leg's SessionStart, before this leg's
-// directive is built — sessionstart.mjs:206/258, 277/293) is the boundary that
+// directive is built — session-start.mjs:206/258, 277/293) is the boundary that
 // opened the current leg. Rows with created_at < boundary are prior-leg.
 function computeLegBoundary(events) {
   let boundary = null;

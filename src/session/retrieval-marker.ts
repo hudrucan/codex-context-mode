@@ -14,12 +14,13 @@
  * env; the per-project session DB path is). The next PostToolUse fire — which
  * DOES run for ordinary tools (Bash/Read/Edit) — consumes the marker and
  * emits a forwardable event carrying `bytes_retrieved`. Mirrors the existing
- * redirect / latency / rejected marker handshake in posttooluse.mjs.
+ * redirect / latency / rejected marker handshake in post-tool-use.mjs.
  */
 
 import { appendFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { runtimeCacheDir } from "../runtime-paths.js";
 
 /**
  * Tmp marker path for a session DB. Keyed by basename so the server (which
@@ -28,7 +29,7 @@ import { basename, join } from "node:path";
  * (`<hash>__<suffix>.db`), so basename collisions across projects are
  * negligible.
  */
-export function retrievalMarkerPath(sessionDbPath: string, tmpDir: string = tmpdir()): string {
+export function retrievalMarkerPath(sessionDbPath: string, tmpDir: string = runtimeCacheDir()): string {
   return join(tmpDir, `context-mode-retrieval-${basename(sessionDbPath)}.txt`);
 }
 

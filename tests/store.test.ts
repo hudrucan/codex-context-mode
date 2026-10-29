@@ -12,7 +12,7 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { ContentStore, cleanupStaleDBs } from "../src/store.js";
+import { ContentStore } from "../src/store.js";
 import {
   withRetry,
   closeDB,
@@ -1137,31 +1137,6 @@ describe("Smart Chunk Titles", () => {
 });
 
 describe("DB Cleanup", () => {
-  test("cleanupStaleDBs removes files for dead PIDs", () => {
-    const fakePid = 99999;
-    const fakePath = join(tmpdir(), `context-mode-${fakePid}.db`);
-    writeFileSync(fakePath, "fake");
-    writeFileSync(fakePath + "-wal", "fake");
-    writeFileSync(fakePath + "-shm", "fake");
-
-    const cleaned = cleanupStaleDBs();
-    assert.ok(cleaned >= 1, `Should clean at least 1 file, cleaned ${cleaned}`);
-    assert.ok(!existsSync(fakePath), "DB file should be removed");
-    assert.ok(!existsSync(fakePath + "-wal"), "WAL file should be removed");
-    assert.ok(!existsSync(fakePath + "-shm"), "SHM file should be removed");
-  });
-
-  test("cleanupStaleDBs does not remove current process DB", () => {
-    const myPath = join(tmpdir(), `context-mode-${process.pid}.db`);
-    writeFileSync(myPath, "current");
-
-    cleanupStaleDBs();
-    assert.ok(existsSync(myPath), "Current process DB should NOT be removed");
-
-    // Clean up manually
-    try { require("fs").unlinkSync(myPath); } catch {}
-  });
-
   test("store.cleanup() removes own DB and WAL/SHM files", () => {
     const store = createStore();
     // Index something to generate WAL activity

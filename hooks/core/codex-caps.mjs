@@ -20,6 +20,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { runtimeCacheDir } from "../runtime-paths.mjs";
 
 /**
  * First Codex release verified to honor PreToolUse allow+updatedInput and
@@ -87,7 +88,7 @@ function defaultRunVersion() {
  */
 export function codexSupportsUpdatedInput(io = {}) {
   const now = io.now ?? Date.now;
-  const cachePath = io.cachePath ?? join(tmpdir(), CACHE_FILE);
+  const cachePath = io.cachePath ?? join(runtimeCacheDir(), CACHE_FILE);
   const runVersion = io.runVersion ?? defaultRunVersion;
 
   // Fast path: a non-expired cache entry.

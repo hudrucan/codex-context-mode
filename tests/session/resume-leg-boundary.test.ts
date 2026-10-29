@@ -14,7 +14,7 @@
  *
  * The leg boundary is the most recent `session_start` lifecycle event in the
  * events array (emitted by the prior leg's SessionStart, before the directive
- * for the current leg is built — see hooks/sessionstart.mjs:206/258, 277/293).
+ * for the current leg is built — see hooks/session-start.mjs:206/258, 277/293).
  */
 
 import { describe, test, expect } from "vitest";

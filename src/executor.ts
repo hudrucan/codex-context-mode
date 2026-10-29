@@ -2,6 +2,7 @@ import { spawn, execSync, execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { runtimeCacheDir } from "./runtime-paths.js";
 import {
   detectRuntimes,
   buildCommand,
@@ -96,19 +97,7 @@ export function buildPowerShellScriptContent(code: string): string {
  * os.tmpdir() reads TMPDIR from the environment, which some shells/tools
  * set to the project root — causing temp files to pollute the working tree.
  */
-const OS_TMPDIR = (() => {
-  if (isWin) return process.env.TEMP ?? process.env.TMP ?? tmpdir();
-  try {
-    const result = execFileSync(
-      process.platform === "darwin" ? "getconf" : "mktemp",
-      process.platform === "darwin" ? ["DARWIN_USER_TEMP_DIR"] : ["-u", "-d"],
-      { env: { ...process.env, TMPDIR: undefined as unknown as string }, encoding: "utf-8" },
-    ).trim();
-    const dir = process.platform === "darwin" ? result : resolve(result, "..");
-    if (dir && dir !== process.cwd()) return dir;
-  } catch { /* fall through */ }
-  return "/tmp";
-})();
+const OS_TMPDIR = runtimeCacheDir();
 
 /**
  * Pure helper — exported for unit testing. Issue #782.
@@ -197,8 +186,11 @@ function cleanupTmpDir(tmpDir: string): void {
 function killTree(proc: ReturnType<typeof spawn>): void {
   if (isWin && proc.pid) {
     try {
-      execSync(`taskkill /F /T /PID ${proc.pid}`, { stdio: "pipe" });
-    } catch { /* already dead */ }
+      execSync(`taskkill /F /T /PID ${proc.pid}`, { stdio: "pipe", windowsHide: true, timeout: 5000 });
+    } catch {
+      // Restricted Windows hosts may deny taskkill while Node still owns its child handle.
+      try { proc.kill("SIGKILL"); } catch { /* already dead */ }
+    }
   } else if (proc.pid) {
     try {
       // Kill entire process group (negative PID) to prevent orphaned children
@@ -757,6 +749,10 @@ export class PolyglotExecutor {
       case "python":
         return `FILE_CONTENT_PATH = ${escaped}\nfile_path = FILE_CONTENT_PATH\nwith open(FILE_CONTENT_PATH, "r", encoding="utf-8") as _f:\n    FILE_CONTENT = _f.read()\n${code}`;
       case "shell": {
+        if (isPowerShell(this.#runtimes.shell)) {
+          const path = "'" + absolutePath.replace(/'/g, "''") + "'";
+          return `$FILE_CONTENT_PATH=${path}\n$file_path=$FILE_CONTENT_PATH\n$FILE_CONTENT=[System.IO.File]::ReadAllText($FILE_CONTENT_PATH)\n${code}`;
+        }
         // Single-quote the path to prevent $, backtick, and ! expansion
         const sq = "'" + absolutePath.replace(/'/g, "'\\''") + "'";
         return `FILE_CONTENT_PATH=${sq}\nfile_path=${sq}\nFILE_CONTENT=$(cat ${sq})\n${code}`;

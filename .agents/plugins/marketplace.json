@@ -1,14 +1,14 @@
 {
-  "name": "context-mode",
+  "name": "codex-context-mode",
   "interface": {
-    "displayName": "context-mode"
+    "displayName": "Codex Context Mode"
   },
   "plugins": [
     {
-      "name": "context-mode",
+      "name": "codex-context-mode",
       "source": {
-        "source": "url",
-        "url": "./"
+        "source": "local",
+        "path": "./dist/codex-context-mode"
       },
       "policy": {
         "installation": "AVAILABLE",

@@ -1,8 +1,8 @@
 {
-  "name": "context-mode",
+  "name": "codex-context-mode",
   "version": "1.0.169",
   "type": "module",
-  "description": "Codex-only MCP tools for sandboxed code execution, SQLite FTS5 search and session continuity. Self-upgrade is disabled; use a reviewed local checkout.",
+  "description": "Codex plugin for local execution, SQLite FTS5 search and session continuity.",
   "author": "Mert Koseoğlu",
   "license": "Elastic-2.0",
   "keywords": [
@@ -25,38 +25,30 @@
     "./cli": "./cli.bundle.mjs"
   },
   "bin": {
-    "context-mode": "./cli.bundle.mjs"
+    "codex-context-mode": "./cli.bundle.mjs"
   },
   "files": [
-    "build",
     "hooks",
-    "configs",
+    "skills",
+    ".codex-plugin/plugin.json",
+    ".mcp.json",
+    "start.mjs",
     "server.bundle.mjs",
     "cli.bundle.mjs",
-    "skills",
-    ".codex-plugin",
-    "start.mjs",
-    "scripts/postinstall.mjs",
-    "scripts/heal-better-sqlite3.mjs",
-    "scripts/plugin-cache-integrity.mjs",
+    "html-transform.bundle.cjs",
     "README.md",
     "LICENSE",
-    ".agents/plugins/marketplace.json",
-    "CONTRIBUTING.md",
-    "BENCHMARK.md",
-    "docs",
-    ".mcp.json.codex.example"
+    "NOTICE"
   ],
   "scripts": {
     "build": "node -e \"require('fs').rmSync('build',{recursive:true,force:true})\" && tsc && node -e \"if(process.platform!=='win32'){require('fs').chmodSync('build/cli.js',0o755)}\" && npm run bundle && npm run assert-bundle && npm run assert-asymmetric-drift",
-    "assert-bundle": "node scripts/assert-bundle.mjs server.bundle.mjs cli.bundle.mjs hooks/session-extract.bundle.mjs hooks/session-snapshot.bundle.mjs hooks/session-db.bundle.mjs hooks/security.bundle.mjs",
+    "assert-bundle": "node scripts/assert-bundle.mjs server.bundle.mjs cli.bundle.mjs hooks/session-extract.bundle.mjs hooks/session-snapshot.bundle.mjs hooks/session-db.bundle.mjs hooks/security.bundle.mjs hooks/codex-usage.bundle.mjs html-transform.bundle.cjs",
     "assert-asymmetric-drift": "node scripts/assert-asymmetric-drift.mjs",
-    "bundle": "esbuild src/server.ts --bundle --platform=node --target=node18 --format=esm --outfile=server.bundle.mjs --external:better-sqlite3 --external:turndown --external:turndown-plugin-gfm --external:@mixmark-io/domino --minify && esbuild src/cli.ts --bundle --platform=node --target=node18 --format=esm --outfile=cli.bundle.mjs --external:better-sqlite3 --minify && esbuild src/session/extract.ts --bundle --platform=node --target=node18 --format=esm --outfile=hooks/session-extract.bundle.mjs --minify && esbuild src/session/snapshot.ts --bundle --platform=node --target=node18 --format=esm --outfile=hooks/session-snapshot.bundle.mjs --minify && esbuild src/session/db.ts --bundle --platform=node --target=node18 --format=esm --outfile=hooks/session-db.bundle.mjs --external:better-sqlite3 --minify && esbuild src/security.ts --bundle --platform=node --target=node18 --format=esm --outfile=hooks/security.bundle.mjs --minify",
+    "bundle": "esbuild src/server.ts --bundle --platform=node --target=node18 --format=esm --outfile=server.bundle.mjs --external:better-sqlite3 --minify && esbuild src/cli.ts --bundle --platform=node --target=node18 --format=esm --outfile=cli.bundle.mjs --external:better-sqlite3 --minify && esbuild src/session/extract.ts --bundle --platform=node --target=node18 --format=esm --outfile=hooks/session-extract.bundle.mjs --minify && esbuild src/session/snapshot.ts --bundle --platform=node --target=node18 --format=esm --outfile=hooks/session-snapshot.bundle.mjs --minify && esbuild src/session/db.ts --bundle --platform=node --target=node18 --format=esm --outfile=hooks/session-db.bundle.mjs --external:better-sqlite3 --minify && esbuild src/security.ts --bundle --platform=node --target=node18 --format=esm --outfile=hooks/security.bundle.mjs --minify && esbuild src/adapters/codex/usage.ts --bundle --platform=node --target=node18 --format=esm --outfile=hooks/codex-usage.bundle.mjs --minify && esbuild src/html-transform.ts --bundle --platform=node --target=node18 --format=cjs --outfile=html-transform.bundle.cjs --minify",
     "version-sync": "node scripts/version-sync.mjs",
     "version": "node scripts/version-sync.mjs && git add package.json .codex-plugin/plugin.json",
     "prepublishOnly": "npm run build",
     "dev": "npx tsx src/server.ts",
-    "setup": "npx tsx src/cli.ts setup",
     "doctor": "npx tsx src/cli.ts doctor",
     "typecheck": "tsc --noEmit",
     "pretest": "npm run build",
@@ -66,14 +58,12 @@
     "test:use-cases": "npx tsx tests/use-cases.ts",
     "test:compare": "npx tsx tests/context-comparison.ts",
     "test:ecosystem": "npx tsx tests/ecosystem-benchmark.ts",
-    "postinstall": "node scripts/postinstall.mjs"
+    "package-plugin": "node scripts/package-plugin.mjs"
   },
   "dependencies": {
-    "@clack/prompts": "^1.0.1",
     "@mixmark-io/domino": "^2.2.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "better-sqlite3": "^12.6.2",
-    "picocolors": "^1.1.1",
     "turndown": "^7.2.0",
     "turndown-plugin-gfm": "^1.0.2",
     "zod": "^3.25.0"

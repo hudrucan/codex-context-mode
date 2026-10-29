@@ -1,7 +1,7 @@
 /**
- * D2 PRD Phase 6.1 — precompact.mjs emits snapshot-built event with bytes_avoided.
+ * D2 PRD Phase 6.1 — pre-compact.mjs emits snapshot-built event with bytes_avoided.
  *
- * Spawns the real precompact.mjs hook (matching the integration.test.ts pattern),
+ * Spawns the real pre-compact.mjs hook (matching the integration.test.ts pattern),
  * pre-seeds the per-project SessionDB with a few events so a snapshot can build,
  * runs the hook, then opens the DB raw and asserts the new
  * `category='compaction', type='snapshot-built', bytes_avoided > 0` row landed.
@@ -25,7 +25,7 @@ const _hashCanonical = (p: string) => createHash("sha256").update(
 ).digest("hex").slice(0, 16);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PRECOMPACT_PATH = join(__dirname, "..", "..", "hooks", "codex", "precompact.mjs");
+const PRECOMPACT_PATH = join(__dirname, "..", "..", "hooks", "codex", "pre-compact.mjs");
 
 interface RawEventRow {
   type: string;
@@ -50,7 +50,7 @@ function readEvents(dbPath: string, sessionId: string, type: string): RawEventRo
   }
 }
 
-describe("precompact.mjs — snapshot-built event (D2 PRD Phase 6.1)", () => {
+describe("pre-compact.mjs — snapshot-built event (D2 PRD Phase 6.1)", () => {
   let fakeHome: string;
   let fakeProject: string;
   let env: Record<string, string>;
@@ -75,14 +75,14 @@ describe("precompact.mjs — snapshot-built event (D2 PRD Phase 6.1)", () => {
   });
 
   test("persists a snapshot, compact count and compaction summary", () => {
-    // Pre-seed the SessionDB at the path precompact.mjs would resolve.
+    // Pre-seed the SessionDB at the path pre-compact.mjs would resolve.
     // Use the same hash scheme as session-helpers.mjs:getSessionDBPath.
     const { createHash } = require("node:crypto") as typeof import("node:crypto");
     // Hooks hash the path AFTER normalizeWorktreePath() (\ → /), so the test
     // must apply the same normalization before SHA — otherwise on Windows the
     // expected hash uses backslashes while the hook uses slashes (#435 pattern).
     const projectHash = _hashCanonical(fakeProject.replace(/\\/g, "/"));
-    const dbDir = join(fakeHome, ".codex", "context-mode", "sessions");
+    const dbDir = join(fakeHome, ".codex-context-mode", "data", "sessions");
     require("node:fs").mkdirSync(dbDir, { recursive: true });
     const dbPath = join(dbDir, `${projectHash}.db`);
 
@@ -105,7 +105,7 @@ describe("precompact.mjs — snapshot-built event (D2 PRD Phase 6.1)", () => {
       seedDb.close();
     }
 
-    // Run precompact.mjs subprocess.
+    // Run pre-compact.mjs subprocess.
     const result = spawnSync("node", [PRECOMPACT_PATH], {
       input: JSON.stringify({ session_id: sessionId, cwd: fakeProject }),
       encoding: "utf-8",

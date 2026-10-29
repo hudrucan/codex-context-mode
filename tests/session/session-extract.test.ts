@@ -2148,7 +2148,7 @@ describe("Category 27 — Latency", () => {
   /**
    * Latency tracking uses cross-hook state (tmpdir files) to bridge
    * PreToolUse → PostToolUse. The extractEvents function itself does NOT
-   * produce latency events — they are created directly in posttooluse.mjs
+   * produce latency events — they are created directly in post-tool-use.mjs
    * by comparing timestamps from the tmpdir marker file.
    *
    * These tests verify the architecture is sound:
@@ -2169,7 +2169,7 @@ describe("Category 27 — Latency", () => {
   });
 
   test("latency event shape conforms to SessionEvent interface", () => {
-    // This validates the event shape that posttooluse.mjs will produce
+    // This validates the event shape that post-tool-use.mjs will produce
     const latencyEvent = {
       type: "tool_latency",
       category: "latency",
@@ -2241,7 +2241,7 @@ describe("Category 28 — Permission (architectural limitation)", () => {
   });
 
   test("PreToolUse deny is already captured as rejected-approach (Phase 1)", () => {
-    // When PreToolUse returns action: "deny", the pretooluse.mjs hook already
+    // When PreToolUse returns action: "deny", the pre-tool-use.mjs hook already
     // writes a rejected-approach event. This is the closest we get to permission
     // tracking: we know when context-mode itself denies a tool, but NOT when
     // the user denies a tool.
@@ -2254,9 +2254,9 @@ describe("Category 28 — Permission (architectural limitation)", () => {
     };
 
     const events = extractEvents(input);
-    // rejected-approach is written by pretooluse.mjs directly to DB, not via extractEvents
+    // rejected-approach is written by pre-tool-use.mjs directly to DB, not via extractEvents
     const rejectedEvents = events.filter(e => e.category === "rejected-approach");
-    assert.equal(rejectedEvents.length, 0, "extractEvents does not produce rejected-approach — that's pretooluse.mjs's job");
+    assert.equal(rejectedEvents.length, 0, "extractEvents does not produce rejected-approach — that's pre-tool-use.mjs's job");
   });
 });
 

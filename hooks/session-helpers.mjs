@@ -4,6 +4,7 @@ import { join, dirname } from "node:path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { runtimeCacheDir } from "./runtime-paths.mjs";
 
 // ─────────────────────────────────────────────────────────
 // Bundle binding — single source of truth for path/hash logic.
@@ -52,7 +53,7 @@ let _wtCacheInProcess;
 
 function workTreeMarkerPath(projectDir) {
   return join(
-    tmpdir(),
+    runtimeCacheDir(),
     `cm-wt-${hashProjectDirCanonical(normalizeWorktreePath(projectDir))}.txt`,
   );
 }

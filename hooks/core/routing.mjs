@@ -18,6 +18,7 @@ import {
 import { createToolNamer } from "./tool-naming.mjs";
 import { isMCPReady } from "./mcp-ready.mjs";
 import { existsSync, mkdirSync, rmSync, rmdirSync, readdirSync, unlinkSync, openSync, closeSync, readFileSync, writeFileSync, statSync, constants as fsConstants } from "node:fs";
+import { runtimeCacheDir } from "../runtime-paths.mjs";
 
 /**
  * Guard for actions that redirect to MCP tools (#230).
@@ -115,7 +116,7 @@ function defaultGuidanceId() {
 
 function guidanceDirFor(sessionId) {
   const id = sessionId ? `s-${sessionId}` : defaultGuidanceId();
-  return resolve(tmpdir(), `context-mode-guidance-${id}`);
+  return resolve(runtimeCacheDir(), `codex-context-mode-guidance-${id}`);
 }
 
 function guidanceOnce(type, content, sessionId) {
@@ -596,7 +597,7 @@ function isExternalMcpTool(toolName) {
   if (raw.startsWith(MCP_PREFIX)) {
     const server = raw.slice(MCP_PREFIX.length).split("__")[0];
     if (!server) return false;
-    return !server.includes(CONTEXT_MODE_SUBSTRING);
+    return server.replaceAll("_", "-") !== "codex-context-mode";
   }
 
   // Cursor wire shape: `MCP:<tool>` — own tools are `MCP:ctx_*`. There is no
@@ -610,7 +611,7 @@ function isExternalMcpTool(toolName) {
   if (raw.startsWith(KIRO_MCP_PREFIX) && raw.includes("/")) {
     const server = raw.slice(KIRO_MCP_PREFIX.length).split("/")[0];
     if (!server) return false;
-    return !server.includes(CONTEXT_MODE_SUBSTRING);
+    return server.replaceAll("_", "-") !== "codex-context-mode";
   }
 
   return false;

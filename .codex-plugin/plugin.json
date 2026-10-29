@@ -1,7 +1,7 @@
 {
-  "name": "context-mode",
+  "name": "codex-context-mode",
   "version": "1.0.169",
-  "description": "Codex-only MCP tools for sandboxed code execution, SQLite FTS5 search and session continuity. Self-upgrade is disabled; use a reviewed local checkout.",
+  "description": "Codex plugin for local execution, SQLite FTS5 search and session continuity.",
   "author": {
     "name": "Mert Koseoğlu",
     "url": "https://github.com/mksglu"
@@ -20,12 +20,12 @@
     "context7",
     "codex-cli"
   ],
-  "mcpServers": "./.codex-plugin/mcp.json",
-  "hooks": "./.codex-plugin/hooks.json",
+  "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/hooks.json",
   "skills": "./skills/",
   "interface": {
-    "displayName": "context-mode",
-    "shortDescription": "Codex-only sandbox tools, FTS5 search and session continuity",
+    "displayName": "Codex Context Mode",
+    "shortDescription": "Local execution, FTS5 search and session continuity",
     "developerName": "Mert Koseoğlu",
     "category": "Productivity"
   }

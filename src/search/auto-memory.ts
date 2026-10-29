@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, isAbsolute } from "node:path";
 import { resolveCodexConfigDir } from "../adapters/codex/paths.js";
-import { resolveContextModeDataRoot } from "../adapters/base.js";
+import { runtimePaths } from "../runtime-paths.js";
 import { hashProjectDirCanonical } from "../session/db.js";
 
 const DEBUG = process.env.DEBUG?.includes("context-mode");
@@ -66,10 +66,7 @@ export function searchAutoMemory(
   // scoping to the adapter; legacy adapterless fallback applies the same
   // hash directly so the contract holds at both call sites.
   const adapterMemoryDir = adapter?.getMemoryDir(projectDir);
-  const dataRoot = resolveContextModeDataRoot();
-  const fallbackMemoryBase = dataRoot && !configDir
-    ? join(dataRoot, "context-mode", "memories")
-    : join(effectiveConfigDir, "memories");
+  const fallbackMemoryBase = runtimePaths().memory;
   const fallbackMemoryDir = projectDir
     ? join(fallbackMemoryBase, hashProjectDirCanonical(projectDir))
     : fallbackMemoryBase;

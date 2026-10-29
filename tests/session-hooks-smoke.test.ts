@@ -49,8 +49,8 @@ beforeAll(() => {
 
   // Fake HOME so getSessionDBPath() writes to an isolated location
   fakeHomeDir = mkdtempSync(join(tmpdir(), "ctx-fakehome-"));
-  sessionDBDir = join(fakeHomeDir, ".codex", "context-mode", "sessions");
-  codexSessionDBDir = join(fakeHomeDir, ".codex", "context-mode", "sessions");
+  sessionDBDir = join(fakeHomeDir, ".codex-context-mode", "data", "sessions");
+  codexSessionDBDir = join(fakeHomeDir, ".codex-context-mode", "data", "sessions");
 });
 
 afterAll(() => {
@@ -98,8 +98,8 @@ function getCodexDBFiles(): string[] {
 }
 
 describe("Issue #117 — Session hooks without build/session/", () => {
-  test("posttooluse.mjs creates session DB via bundle (no build/ needed)", () => {
-    const result = runHook("posttooluse.mjs", {
+  test("post-tool-use.mjs creates session DB via bundle (no build/ needed)", () => {
+    const result = runHook("post-tool-use.mjs", {
       session_id: "test-session-117",
       tool_name: "Read",
       tool_input: { file_path: "/src/main.ts" },
@@ -112,9 +112,9 @@ describe("Issue #117 — Session hooks without build/session/", () => {
     expect(getDBFiles().length).toBeGreaterThan(0);
   });
 
-  test("hooks/codex/posttooluse.mjs normalizes failed apply_patch into tool_output.isError", () => {
+  test("hooks/codex/post-tool-use.mjs normalizes failed apply_patch into tool_output.isError", () => {
     const sessionId = "codex-posttooluse-error";
-    const result = runHook("codex/posttooluse.mjs", {
+    const result = runHook("codex/post-tool-use.mjs", {
       session_id: sessionId,
       cwd: fakeProjectDir,
       tool_name: "apply_patch",
@@ -146,8 +146,8 @@ describe("Issue #117 — Session hooks without build/session/", () => {
     expect(events.some((event) => event.type === "file_edit")).toBe(false);
   });
 
-  test("sessionstart.mjs routing block works (independent of build/)", () => {
-    const result = runHook("sessionstart.mjs", {
+  test("session-start.mjs routing block works (independent of build/)", () => {
+    const result = runHook("session-start.mjs", {
       session_id: "test-session-117",
       source: "startup",
     });
@@ -159,9 +159,9 @@ describe("Issue #117 — Session hooks without build/session/", () => {
     expect(parsed.hookSpecificOutput?.additionalContext).toBeDefined();
   });
 
-  test("sessionstart.mjs compact recovery works via bundle", () => {
+  test("session-start.mjs compact recovery works via bundle", () => {
     // First capture some events with same session_id
-    runHook("posttooluse.mjs", {
+    runHook("post-tool-use.mjs", {
       session_id: "test-session-117",
       tool_name: "Bash",
       tool_input: { command: "npm test" },
@@ -169,7 +169,7 @@ describe("Issue #117 — Session hooks without build/session/", () => {
     });
 
     // Trigger compact — session recovery now works via bundled session-db
-    const result = runHook("sessionstart.mjs", {
+    const result = runHook("session-start.mjs", {
       session_id: "test-session-117",
       source: "compact",
     });
@@ -182,8 +182,8 @@ describe("Issue #117 — Session hooks without build/session/", () => {
     expect(ctx).toContain("session_knowledge");
   });
 
-  test("userpromptsubmit.mjs captures prompts via bundle", () => {
-    const result = runHook("userpromptsubmit.mjs", {
+  test("user-prompt-submit.mjs captures prompts via bundle", () => {
+    const result = runHook("user-prompt-submit.mjs", {
       prompt: "fix the login bug",
       session_id: "test-session-117",
     });
@@ -194,8 +194,8 @@ describe("Issue #117 — Session hooks without build/session/", () => {
     expect(getDBFiles().length).toBeGreaterThan(0);
   });
 
-  test("precompact.mjs creates snapshot via bundle", () => {
-    const result = runHook("precompact.mjs", {
+  test("pre-compact.mjs creates snapshot via bundle", () => {
+    const result = runHook("pre-compact.mjs", {
       session_id: "test-session-117",
     });
 

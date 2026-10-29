@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import "./platform.mjs";
 import "../suppress-stderr.mjs";
-import "../ensure-deps.mjs";
 /**
  * Codex CLI Stop hook — record turn-end state for continuity.
  *
@@ -64,7 +63,7 @@ async function loadCodexUsage() {
   try {
     const pluginRoot = join(HOOK_DIR, "..", "..");
     const candidates = [
-      join(pluginRoot, "build", "adapters", "codex", "usage.js"),
+      join(pluginRoot, "hooks", "codex-usage.bundle.mjs"),
     ];
     for (const p of candidates) {
       if (existsSync(p)) return await import(pathToFileURL(p).href);
@@ -118,8 +117,7 @@ try {
           const cursor = db.getUsageCursor(sessionId);
           const { events, cursor: next } = usageMod.extractCodexUsageSince(rollout, cursor);
           if (events.length > 0) {
-            // attributeAndInsertEvents both INSERTS locally and FORWARDS to the
-            // platform (gated on ~/.context-mode/platform.json).
+            // Store usage locally; no hosted forwarding.
             attributeAndInsertEvents(db, sessionId, events, input, projectDir, "Stop", resolveProjectAttributions);
           }
           if (next) db.setUsageCursor(sessionId, next);

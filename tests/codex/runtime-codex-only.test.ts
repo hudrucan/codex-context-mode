@@ -57,7 +57,7 @@ describe("Codex-only CLI runtime", () => {
     const found = f.run(["search", "CodexOnlyCli"]);
     expect(found.status, found.stdout + found.stderr).toBe(0);
     expect(found.stdout).toContain("CodexOnlyCli regression marker");
-    const dbPath = join(f.codexHome, "context-mode", "content", `${hashProjectDirCanonical(f.repo)}.db`);
+    const dbPath = join(f.root, ".codex-context-mode", "data", "content", `${hashProjectDirCanonical(f.repo)}.db`);
     expect(readFileSync(dbPath).subarray(0, 16).toString()).toBe("SQLite format 3\0");
     for (const other of [".claude", ".gemini", ".cursor", ".pi"]) {
       expect(existsSync(join(f.root, other, "context-mode"))).toBe(false);
@@ -67,7 +67,7 @@ describe("Codex-only CLI runtime", () => {
   it("rejects a foreign upgrade platform before accessing the network", () => {
     const result = fixture().run(["upgrade", "--platform", "gemini-cli"]);
     expect(result.status).toBe(1);
-    expect(result.stdout + result.stderr).toContain("only supports --platform codex");
+    expect(result.stdout + result.stderr).toContain("Installation and lifecycle belong to Codex plugin management");
   });
 
   it.each([{ flags: [] }, { flags: ["--platform", "codex"] }])("disables self-upgrade without network or source writes (%j)", ({ flags }) => {
@@ -75,7 +75,7 @@ describe("Codex-only CLI runtime", () => {
     const before = readFileSync(cli);
     const result = f.run(["upgrade", ...flags]);
     expect(result.status, result.stdout + result.stderr).toBe(1);
-    expect(result.stdout + result.stderr).toContain("Self-upgrade is disabled for this fork");
+    expect(result.stdout + result.stderr).toContain("Installation and lifecycle belong to Codex plugin management");
     expect(result.stdout + result.stderr).not.toContain("UNEXPECTED_UPSTREAM_CALL");
     expect(readFileSync(cli).equals(before)).toBe(true);
     expect(existsSync(join(f.codexHome, "config.toml"))).toBe(false);
@@ -84,7 +84,7 @@ describe("Codex-only CLI runtime", () => {
   it("doctor reports local versions without checking npm upstream", () => {
     const result = fixture().run(["doctor"]);
     expect(result.error).toBeUndefined();
-    expect(result.stdout + result.stderr).toContain("Self-upgrade is disabled for this fork");
+    expect(result.stdout).toContain("codex-context-mode doctor");
     expect(result.stdout + result.stderr).not.toContain("UNEXPECTED_UPSTREAM_CALL");
     expect(result.stdout + result.stderr).not.toContain("latest v");
   });
@@ -92,6 +92,6 @@ describe("Codex-only CLI runtime", () => {
   it("does not dispatch another platform's hooks", () => {
     const result = fixture().run(["hook", "gemini-cli", "beforetool"]);
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("only supports Codex hooks");
+    expect(result.stderr).toContain("Expected hook codex");
   });
 });

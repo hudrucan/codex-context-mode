@@ -460,18 +460,8 @@ function bunVersionAtLeast1(versionOutput: string): boolean {
  * Why bun ≥1.0 instead of "any bun":
  *   - Bun 0.x had multiple ESM/module-resolution regressions that broke
  *     dynamic `import()` inside hooks (and our hooks do ~7 dynamic imports
- *     in `pretooluse.mjs`).
- *   - 1.0 ships stable npm-compat that our better-sqlite3-adjacent code
- *     relies on indirectly (hooks share `ensure-deps.mjs` which is
- *     bun-safe past 1.0 but not 0.x).
- *
- * NOT used by:
- *   - `buildNodeCommand` — kept on `process.execPath` for openclaw doctor /
- *     upgrade hints which must invoke the better-sqlite3-loading CLI on
- *     Node (#543: bun cannot dlopen better-sqlite3's prebuilt .node).
- *   - `ensure-deps.mjs` — separate path, must stay on Node for the same
- *     reason.
- *   - `ctx_upgrade` — separate path, must stay on Node for the same reason.
+ *     in `pre-tool-use.mjs`).
+ * Hook commands use the prebuilt plugin assets; startup performs no dependency repair.
  */
 /**
  * Liveness-guarded Node path for the hook-runtime fallback (issue #841).
