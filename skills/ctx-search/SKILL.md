@@ -26,10 +26,12 @@ ctx_search({
 })
 ```
 
-5. If MCP tools are unavailable, fall back to the CLI:
+5. If MCP tools are unavailable, derive the plugin root from this skill location and invoke that local CLI bundle:
 
 ```bash
-context-mode search "authentication middleware" --source project:<name> --limit 5
+node "/absolute/path/to/codex-context-mode/cli.bundle.mjs" search "authentication middleware" --source project:<name> --limit 5
 ```
 
-6. If the index is empty, tell the user to run `/context-mode:ctx-index` or `context-mode index <path>` first.
+6. If the index is empty, tell the user to run `/context-mode:ctx-index` or the local CLI index command first.
+
+Use the actual reviewed plugin root; never fall back to a bare global package command or an upstream install.

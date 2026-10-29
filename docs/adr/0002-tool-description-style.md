@@ -1,5 +1,7 @@
 # ADR-0002 — Tool description voice and structure
 
+> Historical decision record. Host names and implementation paths below describe the decision at the time; use the current README and Codex configuration for supported setup. The architectural/security rationale remains relevant.
+
 - **Status**: Accepted
 - **Date**: 2026-05-24
 - **PR**: #683 (substitutes #654)

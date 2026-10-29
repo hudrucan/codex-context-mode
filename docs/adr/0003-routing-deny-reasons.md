@@ -1,5 +1,7 @@
 # ADR-0003 — Routing deny reasons: redirect ≠ restriction
 
+> Historical decision record. Host names and implementation paths below describe the decision at the time; use the current README and Codex configuration for supported setup. The architectural/security rationale remains relevant.
+
 - **Status**: Accepted — amended 2026-05-24 (PR #683 follow-up) to drop the
   `"NOT a network restriction"` negation prescription; see §Amendment.
 - **Date**: 2026-05-24

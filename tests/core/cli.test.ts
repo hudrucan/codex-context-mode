@@ -93,19 +93,21 @@ describe("cli.bundle.mjs — marketplace install support", () => {
 
   // ── Skill files ────────────────────────────────────────────
 
-  it("ctx-upgrade skill uses cli.bundle.mjs with fallback", () => {
+  it("ctx-upgrade skill reports disabled status without an install fallback", () => {
     const skill = readFileSync(resolve(ROOT, "skills", "ctx-upgrade", "SKILL.md"), "utf-8");
-    expect(skill).toContain("cli.bundle.mjs");
-    expect(skill).toContain("build/cli.js");
-    // Fallback pattern: try bundle first, then build
-    expect(skill).toMatch(/CLI=.*cli\.bundle\.mjs.*\[ ! -f.*\].*build\/cli\.js/);
+    expect(skill).toContain("Self-upgrade is disabled");
+    expect(skill).toContain("No upgrade command is generated");
+    expect(skill).toContain("no shell fallback");
+    expect(skill).not.toMatch(/git clone|npm (?:install|update)|bun add -g|node .* upgrade/);
   });
 
-  it("ctx-doctor skill uses cli.bundle.mjs with fallback", () => {
+  it("ctx-doctor skill pins a local Node CLI with a built CLI fallback", () => {
     const skill = readFileSync(resolve(ROOT, "skills", "ctx-doctor", "SKILL.md"), "utf-8");
     expect(skill).toContain("cli.bundle.mjs");
     expect(skill).toContain("build/cli.js");
-    expect(skill).toMatch(/CLI=.*cli\.bundle\.mjs.*\[ ! -f.*\].*build\/cli\.js/);
+    expect(skill).toContain("spawnSync(process.execPath, [cli, \"doctor\"]");
+    expect(skill).toContain("pluginRoot");
+    expect(skill).not.toContain("context-mode doctor");
   });
 
   it("ctx-index and ctx-search skills expose slash-style triggers", () => {
@@ -113,10 +115,10 @@ describe("cli.bundle.mjs — marketplace install support", () => {
     const searchSkill = readFileSync(resolve(ROOT, "skills", "ctx-search", "SKILL.md"), "utf-8");
     expect(indexSkill).toContain("Trigger: /context-mode:ctx-index");
     expect(indexSkill).toContain("user-invocable: true");
-    expect(indexSkill).toContain("context-mode index");
+    expect(indexSkill).toContain('node "/absolute/path/to/codex-context-mode/cli.bundle.mjs" index');
     expect(searchSkill).toContain("Trigger: /context-mode:ctx-search");
     expect(searchSkill).toContain("user-invocable: true");
-    expect(searchSkill).toContain("context-mode search");
+    expect(searchSkill).toContain('node "/absolute/path/to/codex-context-mode/cli.bundle.mjs" search');
   });
 
   // ── .gitignore ─────────────────────────────────────────────
@@ -876,17 +878,14 @@ describe("SKILL.md prefers MCP tool over Bash", () => {
     expect(mcpIdx).toBeLessThan(fallbackIdx);
   });
 
-  it("ctx-upgrade SKILL.md prefers MCP tool over Bash", () => {
+  it("ctx-upgrade SKILL.md uses MCP only to report its disabled status", () => {
     const skill = readFileSync(resolve(ROOT, "skills", "ctx-upgrade", "SKILL.md"), "utf-8");
     // Must mention the MCP tool
     expect(skill).toContain("ctx_upgrade");
     expect(skill).toContain("MCP tool");
-    // MCP tool instruction must appear BEFORE the Bash fallback
-    const mcpIdx = skill.indexOf("ctx_upgrade");
-    const fallbackIdx = skill.indexOf("Fallback");
-    expect(mcpIdx).toBeGreaterThan(-1);
-    expect(fallbackIdx).toBeGreaterThan(-1);
-    expect(mcpIdx).toBeLessThan(fallbackIdx);
+    expect(skill).toContain("expected result");
+    expect(skill).toContain("do not execute one");
+    expect(skill).not.toContain("Fallback");
   });
 });
 
@@ -1001,8 +1000,8 @@ describe("Codex CLI hook dispatch (#225)", () => {
     for (const [eventType, entries] of Object.entries(hooksJson.hooks)) {
       for (const entry of entries as any[]) {
         for (const hook of entry.hooks) {
-          // Command must use "context-mode hook codex <event>"
-          expect(hook.command).toMatch(/context-mode hook codex \w+/);
+          // Pin the reviewed fork while preserving the Codex hook dispatcher.
+          expect(hook.command).toMatch(/^node "\/absolute\/path\/to\/codex-context-mode\/cli\.bundle\.mjs" hook codex \w+$/);
         }
       }
     }

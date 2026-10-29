@@ -1188,7 +1188,7 @@ describe("Codex matcher parity + config integrity", () => {
     };
     expect(parsed.hooks.PreCompact).toBeDefined();
     const entry = parsed.hooks.PreCompact?.[0];
-    expect(entry?.hooks?.[0]?.command).toBe("context-mode hook codex precompact");
+    expect(entry?.hooks?.[0]?.command).toBe('node "/absolute/path/to/codex-context-mode/cli.bundle.mjs" hook codex precompact');
   });
 
   it("README documents the same Codex PreToolUse matcher as the adapter", () => {

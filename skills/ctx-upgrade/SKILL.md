@@ -1,31 +1,19 @@
 ---
 name: ctx-upgrade
 description: |
-  Update context-mode from GitHub and fix hooks/settings.
-  Pulls latest, builds, installs, updates npm global, configures hooks.
+  Self-upgrade is disabled in this Codex-only fork.
+  Report the disabled status; do not download, reinstall or rewrite source/hooks.
   Trigger: /context-mode:ctx-upgrade
 user-invocable: true
 ---
 
-# Context Mode Upgrade
+# Context Mode Upgrade — Disabled
 
-Pull latest from GitHub and reinstall the plugin.
+Self-upgrade is disabled. Use a reviewed local checkout and the documented local pilot procedure when an update is explicitly requested.
 
 ## Instructions
 
-1. Call the `ctx_upgrade` MCP tool directly. It returns a shell command to execute.
-2. Run the returned command using your shell execution tool (Bash, shell_execute, etc.).
-3. Display results as a markdown checklist:
-   ```
-   ## context-mode upgrade
-   - [x] Pulled latest from GitHub
-   - [x] Built and installed v1.0.39
-   - [x] Hooks configured
-   - [x] Doctor: all checks PASS
-   ```
-   Use `[x]` for success, `[ ]` for failure. Show actual version numbers.
-4. Tell the user to **restart their session** to pick up the new version.
-5. **Fallback** (only if MCP tool call fails): Derive the **plugin root** from this skill's base directory (go up 2 levels — remove `/skills/ctx-upgrade`), then run with Bash:
-   ```
-   CLI="<PLUGIN_ROOT>/cli.bundle.mjs"; [ ! -f "$CLI" ] && CLI="<PLUGIN_ROOT>/build/cli.js"; node "$CLI" upgrade
-   ```
+1. Call the `ctx_upgrade` MCP tool only to report its disabled status. An error response stating that self-upgrade is disabled is the expected result.
+2. Display that status honestly. No upgrade command is generated; do not execute one, install an upstream package, or reconfigure hooks.
+3. If the MCP tool is unavailable, report that self-upgrade is disabled. There is no shell fallback and no automatic download/install path.
+4. Do not claim a pull, build, install or rollout occurred.

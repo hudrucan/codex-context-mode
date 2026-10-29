@@ -247,7 +247,9 @@ export function formatPartialInstallReport({ pluginRoot, missing }) {
     `  pluginRoot: ${pluginRoot}`,
     "  missing:",
     ...missing.map((m) => `    - ${m}`),
-    "  fix: rm -rf the install dir and re-pull (marketplace) or run `npm install -g context-mode` again.",
+    "  fix: Stop this installation's MCP/hook processes and back up the checkout, configuration, and storage.",
+    "       Restore missing files from the same reviewed local fork revision or its known-good backup. Rebuild in a separate candidate directory and verify integrity before switching.",
+    "       Keep the live installation intact for rollback; do not delete it or replace it with an upstream/global package.",
     "",
   ];
   return lines.join("\n");

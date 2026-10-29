@@ -1,11 +1,15 @@
-# Codex CLI — context-mode MCP server configuration
-# Add this to ~/.codex/config.toml
+# Codex CLI — local fork MCP configuration
+# Merge into $CODEX_HOME/config.toml (default ~/.codex/config.toml).
+# Replace the absolute launcher path with the reviewed fork checkout.
+# On Windows use forward slashes, e.g. D:/repos/codex-context-mode/start.mjs.
+# Pin hooks to the same checkout using configs/codex/hooks.json.
 
 [features]
 hooks = true
 
 [mcp_servers.context-mode]
-command = "context-mode"
+command = "node"
+args = ["/absolute/path/to/codex-context-mode/start.mjs"]
 
 [mcp_servers.context-mode.env]
 CONTEXT_MODE_PLATFORM = "codex"

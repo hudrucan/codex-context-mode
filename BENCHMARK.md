@@ -1,5 +1,7 @@
 # Context Mode — Benchmark Results
 
+> Historical upstream measurements, retained for attribution and comparison. Host names and context-window assumptions describe that benchmark environment, not supported integrations or a fresh performance claim for this Codex-only fork.
+
 > Benchmarked against **real outputs** from popular Claude Code MCP servers, Skills, and dev tools.
 > All fixtures captured from actual tool invocations — not synthetic data.
 

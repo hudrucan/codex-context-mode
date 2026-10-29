@@ -1,6 +1,6 @@
-# JavaScript / TypeScript Patterns for execute
+# JavaScript / TypeScript Patterns for ctx_execute
 
-Practical patterns for using `execute` with `language: javascript`.
+Practical patterns for using `ctx_execute` with `language: javascript`.
 All examples assume Node.js runtime with native fetch (Node 18+).
 
 ---

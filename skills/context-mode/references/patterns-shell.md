@@ -1,6 +1,8 @@
-# Shell Patterns for execute
+# Shell Patterns for ctx_execute
 
-Practical patterns for using `execute` with `language: shell`.
+These examples use Bash and require Bash explicitly. Windows shell detection may choose PowerShell or cmd; do not send these scripts to another shell. Use JavaScript for portable operations or invoke Bash deliberately when available.
+
+Practical patterns for using `ctx_execute` with `language: shell`.
 Best for piping, filtering, and leveraging native OS tools.
 
 ---

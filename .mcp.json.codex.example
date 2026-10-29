@@ -1,10 +1,10 @@
 {
-  "_comment": "Standalone Codex configuration. Replace the absolute start.mjs path. MCP requests use thread identity; CONTEXT_MODE_PROJECT_DIR can explicitly pin a workspace.",
+  "_comment": "Standalone Codex local-fork example. Replace the absolute launcher path with the reviewed checkout; never resolve context-mode from npm global. Requests route by thread identity; an explicit CONTEXT_MODE_PROJECT_DIR pin is optional.",
   "mcpServers": {
     "context-mode": {
       "command": "node",
       "args": [
-        "/absolute/path/to/context-mode/start.mjs"
+        "/absolute/path/to/codex-context-mode/start.mjs"
       ]
     }
   }

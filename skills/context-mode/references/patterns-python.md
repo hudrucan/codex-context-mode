@@ -1,6 +1,6 @@
-# Python Patterns for execute
+# Python Patterns for ctx_execute
 
-Practical patterns for using `execute` with `language: python`.
+Practical patterns for using `ctx_execute` with `language: python`.
 All examples use Python standard library only (no pip installs required).
 
 ---

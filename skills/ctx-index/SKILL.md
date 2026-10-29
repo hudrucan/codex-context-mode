@@ -27,10 +27,10 @@ ctx_index({
 })
 ```
 
-5. If MCP tools are unavailable, fall back to the CLI:
+5. If MCP tools are unavailable, derive the plugin root from this skill location and invoke that local CLI bundle:
 
 ```bash
-context-mode index . --source project:<name>
+node "/absolute/path/to/codex-context-mode/cli.bundle.mjs" index . --source project:<name>
 ```
 
 6. Report the indexed source label, file count or section count, and the matching search command:
@@ -44,3 +44,5 @@ ctx_search({ source: "project:<name>", queries: ["..."] })
 - Do not index dependency directories, build outputs, secrets, or generated artifacts.
 - Prefer `--exclude` or `exclude` for project-specific noisy paths.
 - For broad repos, ask the user before raising `maxFiles` above 500.
+
+Use the actual reviewed plugin root; never fall back to a bare global package command or an upstream install.

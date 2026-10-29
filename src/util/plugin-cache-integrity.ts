@@ -147,7 +147,9 @@ export function checkPluginCacheIntegritySync(
         detail:
           `partial install — critical launch files missing: ${launchMissing.join(", ")} ` +
           `(integrity helper also missing: ${cachedError}); the MCP server cannot start. ` +
-          `Reinstall: npm install -g context-mode@latest`,
+          `Recovery: stop the affected MCP/hook processes and back up the checkout, configuration, and storage. ` +
+          `Restore the same reviewed local fork revision or its known-good backup, rebuild in a separate candidate directory, and verify integrity before switching. ` +
+          `Keep the live installation intact for rollback; do not delete it or replace it with an upstream/global package.`,
       };
     }
     return {

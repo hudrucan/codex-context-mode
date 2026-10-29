@@ -94,6 +94,52 @@ describe(".codex-plugin/plugin.json", () => {
   it("version matches package.json (kept in lockstep by version-sync)", () => {
     expect(manifest.version).toBe(pkg.version);
   });
+
+  it("keeps identity and attribution while describing the Codex-only local fork", () => {
+    expect(manifest.name).toBe("context-mode");
+    expect(pkg.name).toBe("context-mode");
+    expect(manifest.description).toBe(pkg.description);
+    expect(String(manifest.description)).toContain("Codex-only");
+    expect(String(manifest.description)).toContain("Self-upgrade is disabled");
+    expect(pkg.engines).toEqual({ node: ">=22.5.0" });
+    expect(pkg.author).toBe("Mert Koseoğlu");
+    expect(manifest.author).toMatchObject({ name: pkg.author });
+    for (const metadata of [pkg, manifest]) {
+      expect(metadata.license).toBe("Elastic-2.0");
+      expect(metadata.keywords).not.toEqual(expect.arrayContaining(["claude-code"]));
+      expect(metadata.keywords).toContain("codex-cli");
+    }
+  });
+});
+
+describe("standalone local-fork examples", () => {
+  it("pins the launcher rather than resolving an upstream global command", () => {
+    const toml = readFileSync(resolve(REPO_ROOT, "configs/codex/config.toml"), "utf8");
+    const section = toml.split("[mcp_servers.context-mode]")[1]?.split("[mcp_servers.context-mode.env]")[0];
+    expect(section).toContain('command = "node"');
+    expect(section).toContain('args = ["/absolute/path/to/codex-context-mode/start.mjs"]');
+    expect(section).not.toContain('command = "context-mode"');
+    const json = readJson(".mcp.json.codex.example") as {
+      mcpServers: Record<string, { command: string; args: string[] }>;
+    };
+    expect(json.mcpServers["context-mode"]).toMatchObject({
+      command: "node", args: ["/absolute/path/to/codex-context-mode/start.mjs"],
+    });
+  });
+
+  it("pins every manual hook to the same local CLI bundle and valid event", () => {
+    const manual = readJson("configs/codex/hooks.json") as {
+      hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
+    };
+    const plugin = readJson(".codex-plugin/hooks.json") as typeof manual;
+    expect(Object.keys(manual.hooks).sort()).toEqual(Object.keys(plugin.hooks).sort());
+    for (const [event, groups] of Object.entries(manual.hooks)) {
+      for (const group of groups) for (const hook of group.hooks) {
+        expect(hook.command).toBe(`node "/absolute/path/to/codex-context-mode/cli.bundle.mjs" hook codex ${event.toLowerCase()}`);
+        expect(existsSync(resolve(REPO_ROOT, `hooks/codex/${event.toLowerCase()}.mjs`))).toBe(true);
+      }
+    }
+  });
 });
 
 describe(".codex-plugin/hooks.json", () => {

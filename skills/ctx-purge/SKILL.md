@@ -24,7 +24,7 @@ Permanently deletes session data for this project. Two scopes are supported (iss
    - Session events DB (analytics, metadata, resume snapshots) for ALL sessions in the project
    - Session events markdown file
    - In-memory session stats + persisted stats file
-3. Call the `mcp__context-mode__ctx_purge` MCP tool with the chosen parameters:
+3. Call the `ctx_purge` MCP tool with the chosen parameters:
    - Scoped: `{ confirm: true, sessionId: "<id>" }` — implies scope:'session'.
    - Project: `{ confirm: true, scope: "project" }` — explicit destructive form.
    - Bare `{ confirm: true }` still works but emits a deprecation warning. Prefer the explicit forms.
@@ -43,7 +43,7 @@ Permanently deletes session data for this project. Two scopes are supported (iss
 
 ## Important
 
-- `ctx_purge` is the **only** way to delete session data. No other mechanism exists.
+- `ctx_purge` is the supported explicit purge tool. Do not manually delete live SQLite files.
 - `ctx_stats` is read-only — shows statistics only.
 - `/clear` and `/compact` do NOT affect any context-mode data.
 - There is no undo. Re-index content if you need it again.

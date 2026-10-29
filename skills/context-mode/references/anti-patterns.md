@@ -1,4 +1,4 @@
-# Anti-Patterns: Common Mistakes with execute / execute_file
+# Anti-Patterns: Common Mistakes with ctx_execute / ctx_execute_file
 
 Avoid these pitfalls when using context-mode tools.
 
@@ -6,22 +6,22 @@ Avoid these pitfalls when using context-mode tools.
 
 ## 1. Using execute for Small Outputs (< 20 Lines)
 
-**Problem:** `execute` adds overhead (LLM summarization call). For small outputs, Bash is faster and cheaper.
+**Problem:** `ctx_execute` adds subprocess and optional indexing overhead. For small predictable outputs, a native command can be simpler.
 
 ```
 BAD — wasteful use of execute:
-  Tool: execute
+  Tool: ctx_execute
   code: "echo $(node --version)"
   language: shell
 
-GOOD — just use Bash:
-  Tool: Bash
+GOOD — use a native command for the actual host shell:
+  Tool: native shell
   command: node --version
 ```
 
-**Rule:** If the output fits comfortably in your context window (under ~20 lines), use Bash directly. Reserve `execute` for outputs that would bloat context or need intelligent summarization.
+**Rule:** If the output fits comfortably in your context window (under ~20 lines), use a native tool directly. Reserve `ctx_execute` for outputs that would bloat context or need intelligent summarization.
 
-More examples of "just use Bash":
+More small-output examples (adapt syntax to the actual shell):
 - `git status` — usually 5-10 lines
 - `ls -la` — directory listing
 - `cat .env.example` — small config file
@@ -32,7 +32,7 @@ More examples of "just use Bash":
 
 ## 2. Forgetting to Print Output
 
-**Problem:** `execute` captures stdout. If your code doesn't print anything, the summary will be empty or meaningless.
+**Problem:** `ctx_execute` captures stdout. If your code doesn't print anything, the summary will be empty or meaningless.
 
 ```javascript
 // BAD — no output:
@@ -65,7 +65,7 @@ for r in result:
     print(f"  {r['id']}: {r['message']}")
 ```
 
-**Rule:** Every `execute` script must end with print/console.log of the results you want summarized.
+**Rule:** Every `ctx_execute` script must end with print/console.log of the results you want summarized.
 
 ---
 
@@ -106,7 +106,7 @@ Signs you should switch from shell:
 
 ## 4. Loading Entire Files into Context Then Processing
 
-**Problem:** Reading a 10,000-line file with `Read` tool, then asking about it, wastes your entire context window. Use `execute` to process the file and return only the summary.
+**Problem:** Reading a 10,000-line file with `Read` tool, then asking about it, wastes your entire context window. Use `ctx_execute` to process the file and return only the summary.
 
 ```
 BAD workflow:
@@ -148,7 +148,7 @@ GOOD workflow:
      summary_prompt: "Report the installed version of lodash"
 ```
 
-**Rule:** If a file is over 200 lines and you only need specific data from it, use `execute` to extract what you need rather than reading the whole file into context.
+**Rule:** If a file is over 200 lines and you only need specific data from it, use `ctx_execute` to extract what you need rather than reading the whole file into context.
 
 ---
 
@@ -193,7 +193,7 @@ console.log(JSON.stringify(items, null, 2));
 
 ```
 BAD — will timeout on API calls:
-  Tool: execute
+  Tool: ctx_execute
   code: |
     const resp = await fetch('https://api.slow-service.com/data');
     console.log(await resp.json());
@@ -201,7 +201,7 @@ BAD — will timeout on API calls:
   timeout_ms: 5000  ← API may take 10+ seconds
 
 GOOD — generous timeout for network:
-  Tool: execute
+  Tool: ctx_execute
   code: |
     const resp = await fetch('https://api.slow-service.com/data');
     console.log(JSON.stringify(await resp.json(), null, 2));
@@ -272,7 +272,7 @@ The mental model:
 
 ## Summary Checklist
 
-Before using `execute`, verify:
+Before using `ctx_execute`, verify:
 
 - [ ] Output will be > 20 lines (otherwise use Bash)
 - [ ] Script prints all results to stdout

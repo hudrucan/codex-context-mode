@@ -8,29 +8,9 @@ body:
       value: |
         **PRs are always welcome.** If you can implement the feature yourself (with help from your AI agent), a PR is the fastest path to getting it shipped.
 
-  - type: dropdown
-    id: platform
+  - type: markdown
     attributes:
-      label: Platform
-      description: Which AI agent platform is this feature for?
-      options:
-        - Claude Code
-        - Cursor
-        - VS Code Copilot (GitHub Copilot)
-        - JetBrains Copilot
-        - Gemini CLI
-        - Qwen Code
-        - OpenCode
-        - KiloCode
-        - Codex CLI
-        - OpenClaw (Pi Agent)
-        - Pi
-        - Kiro
-        - Antigravity
-        - Zed
-        - Other (please specify)
-    validations:
-      required: true
+      value: This fork supports Codex only. Describe the Codex workflow and operating system involved.
 
   - type: textarea
     id: feature-description

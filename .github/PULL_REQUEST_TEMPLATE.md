@@ -1,49 +1,24 @@
 ## What / Why / How
 
-<!-- Brief: what changed, why, and implementation approach. Link issue: Fixes #000 -->
+<!-- Describe the concrete behavior or documentation change. Link the fork issue if applicable. -->
 
-## Affected platforms
+## Codex and OS impact
 
-<!-- Check all platforms affected by this change -->
+- [ ] Codex runtime or hooks
+- [ ] Local setup / packaging / documentation
+- [ ] Windows
+- [ ] Linux
+- [ ] macOS
 
-- [ ] Claude Code
-- [ ] Cursor
-- [ ] VS Code Copilot (GitHub Copilot)
-- [ ] JetBrains Copilot
-- [ ] Gemini CLI
-- [ ] Qwen Code
-- [ ] OpenCode
-- [ ] KiloCode
-- [ ] Codex CLI
-- [ ] OpenClaw (Pi Agent)
-- [ ] Pi
-- [ ] Kiro
-- [ ] Antigravity
-- [ ] Zed
-- [ ] All platforms
+## Validation
 
-## Test plan
+<!-- List actual commands/results. Report existing failures, skips and unrun checks. -->
 
-<!-- What tests were added or modified? -->
+- [ ] Typecheck and build checked
+- [ ] Affected tests checked; security assertions preserved
+- [ ] Node.js >= 22.5.0 documentation and runtime contract preserved
+- [ ] Local launcher/hooks pin the reviewed fork
+- [ ] No Windows path, storage or thread-isolation regressions
+- [ ] Links and docs updated where needed
 
-## Checklist
-
-- [ ] Tests added/updated (TDD: red → green)
-- [ ] `npm test` passes
-- [ ] `npm run typecheck` passes
-- [ ] Docs updated if needed (README, platform-support.md)
-- [ ] No Windows path regressions (forward slashes only)
-- [ ] Targets `next` branch (unless hotfix)
-
-<details>
-<summary><strong>Cross-platform notes</strong></summary>
-
-Our CI runs on **Ubuntu, macOS, and Windows**.
-
-- If touching file paths, verify forward-slash normalization on Windows
-- If touching hook paths, verify no backslash separators
-- Use `path.join()` / `path.resolve()`, never hardcode `/` separators
-- Use event-based stdin reading — `readFileSync(0)` breaks on Windows
-- Use `os.tmpdir()`, never hardcode `/tmp`
-
-</details>
+Use quoted paths and path.join/path.resolve in code. Shell examples must name their required shell; Bash syntax is not portable to PowerShell. Preserve LICENSE and upstream attribution. Do not claim local pilot, hook trust, rollout or cross-OS validation without running it.
