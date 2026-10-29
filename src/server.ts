@@ -7,7 +7,6 @@ import { spawnSync, type SpawnSyncOptions, type SpawnSyncReturns } from "node:ch
 import { join, dirname, resolve, sep, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir, tmpdir, cpus, platform } from "node:os";
-import { request as httpsRequest } from "node:https";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { z } from "zod";
 import { PolyglotExecutor } from "./executor.js";
@@ -63,15 +62,14 @@ import {
   resolveProjectScope,
 } from "./search/ctx-search-schema.js";
 import { FloodGuard } from "./search/flood-guard.js";
-import { buildNodeCommand, type HookAdapter, type PlatformId, isInProcessPluginPlatform } from "./adapters/types.js";
-import { detectPlatform, getSessionDirSegments } from "./adapters/detect.js";
+import { buildNodeCommand, type HookAdapter } from "./adapters/types.js";
+import { CodexAdapter } from "./adapters/codex/index.js";
+import { resolveCodexConfigDir } from "./adapters/codex/paths.js";
 import { parseCodexContextModePluginRoot } from "./adapters/codex/index.js";
 import { getHookScriptPaths } from "./util/hook-config.js";
-import { stripJsonComments } from "./util/jsonc.js";
-import { resolveClaudeConfigDir } from "./util/claude-config.js";
 import { resolveCodexRequestContext, resolveProjectDir } from "./util/project-dir.js";
 import { loadDatabase } from "./db-base.js";
-import { AnalyticsEngine, formatReport, getConversationStats, getContentBytesAllSessions, getConversationWindowStats, getLifetimeStats, getMultiAdapterLifetimeStats, getRealBytesStats, pricePerToken } from "./session/analytics.js";
+import { AnalyticsEngine, formatReport, getConversationStats, getContentBytesAllSessions, getConversationWindowStats, getLifetimeStats, getRealBytesStats, pricePerToken } from "./session/analytics.js";
 const __pkg_dir = dirname(fileURLToPath(import.meta.url));
 const VERSION: string = (() => {
   for (const rel of ["../package.json", "./package.json"]) {
@@ -112,11 +110,8 @@ function resolveCodexRuntimePluginRoot(fallbackRoot: string): string {
   return fallbackRoot;
 }
 
-function getRuntimeAwarePackageRoot(platformId?: PlatformId): string {
-  const packageRoot = getPackageRoot();
-  return platformId === "codex"
-    ? resolveCodexRuntimePluginRoot(packageRoot)
-    : packageRoot;
+function getRuntimeAwarePackageRoot(): string {
+  return resolveCodexRuntimePluginRoot(getPackageRoot());
 }
 
 // Prevent silent MCP server death from unhandled async errors.
@@ -154,127 +149,6 @@ export interface RegisteredCtxTool {
 
 export const REGISTERED_CTX_TOOLS: RegisteredCtxTool[] = [];
 
-export function shouldSuppressMcpToolsForNativePluginHost(
-  opts: { embedded?: string; platform?: PlatformId; settings?: Record<string, unknown> | null } = {},
-): boolean {
-  const embedded = opts.embedded ?? process.env.CONTEXT_MODE_EMBEDDED_PLUGIN_TOOLS;
-  if (embedded === "1") return false;
-  const platform = opts.platform ?? detectPlatform().platform;
-  if (platform !== "opencode" && platform !== "kilo") return false;
-  const settings = opts.settings ?? readNativePluginHostSettings(platform);
-  return settingsHasContextModePlugin(settings) && settingsHasLegacyContextModeMcp(settings);
-}
-
-function readNativePluginHostSettings(platform: PlatformId): Record<string, unknown> | null {
-  const base = platform === "kilo" ? "kilo" : "opencode";
-  const paths = [
-    resolve(`${base}.json`),
-    resolve(`${base}.jsonc`),
-    resolve(`.${base}`, `${base}.json`),
-    resolve(`.${base}`, `${base}.jsonc`),
-    join(homedir(), ".config", base, `${base}.json`),
-    join(homedir(), ".config", base, `${base}.jsonc`),
-  ];
-  for (const p of paths) {
-    try {
-      if (!existsSync(p)) continue;
-      return JSON.parse(stripJsonComments(readFileSync(p, "utf8"))) as Record<string, unknown>;
-    } catch { /* try next config path */ }
-  }
-  return null;
-}
-
-function settingsHasContextModePlugin(settings: Record<string, unknown> | null | undefined): boolean {
-  const plugins = settings?.plugin;
-  return Array.isArray(plugins) && plugins.some((p) => typeof p === "string" && p.includes("context-mode"));
-}
-
-function settingsHasLegacyContextModeMcp(settings: Record<string, unknown> | null | undefined): boolean {
-  const mcp = settings?.mcp;
-  return !!(
-    mcp &&
-    typeof mcp === "object" &&
-    !Array.isArray(mcp) &&
-    Object.prototype.hasOwnProperty.call(mcp, "context-mode")
-  );
-}
-
-const suppressMcpToolsForNativePluginHost = shouldSuppressMcpToolsForNativePluginHost();
-
-/**
- * Issue #623 — surface why ctx_* tools/list is empty on suppressed legacy MCP
- * children. When a user upgrades OpenCode/Kilo from v1.0.136 → v1.0.137+ without
- * running `context-mode upgrade`, their opencode.json still has BOTH the legacy
- * mcp.context-mode block AND the plugin entry. The plugin path registers the
- * tools natively, but the legacy MCP child runs in parallel and used to expose
- * duplicate tools — v1.0.137 suppressed those duplicates. The suppression was
- * silent, leaving any MCP client that inspected the child via tools/list with
- * an empty list and no diagnostic. Emit one stderr line per process so an
- * operator running the child directly (or any non-plugin MCP host) sees the
- * exact reason and the `context-mode upgrade` fix.
- *
- * Exported for test (suppression-diagnostic regression guard).
- */
-let __suppressionDiagnosticEmitted = false;
-export function emitSuppressionDiagnostic(
-  opts: { platform?: string; write?: (chunk: string) => void } = {},
-): void {
-  if (__suppressionDiagnosticEmitted) return;
-  __suppressionDiagnosticEmitted = true;
-  const write = opts.write ?? ((c: string) => { process.stderr.write(c); });
-  const platform = opts.platform ?? "opencode/kilo";
-  write(
-    `[context-mode] ctx_* tools/list intentionally empty on this MCP child: ` +
-    `legacy mcp.context-mode block coexists with plugin: ["context-mode"] in ` +
-    `${platform}.json — plugin-native tools are the supported path (#623). ` +
-    `Run \`context-mode upgrade\` to remove the legacy block (preserves other ` +
-    `MCP servers).\n`
-  );
-}
-/** Test-only: reset the one-shot emission flag so suites can re-exercise. */
-export function __resetSuppressionDiagnosticForTests(): void {
-  __suppressionDiagnosticEmitted = false;
-}
-
-/**
- * Issue #637 — register an explicit empty `tools/list` handler on the McpServer.
- *
- * Background: when `suppressMcpToolsForNativePluginHost` is true, every
- * `server.registerTool()` call is short-circuited (returns `undefined` above).
- * The MCP SDK only installs the SDK-default `tools/list` handler when at least
- * one `registerTool()` reaches `setToolRequestHandlers()` internally
- * (mcp.js:56-67). Suppressing every registration leaves `tools/list`
- * unregistered, and the framework's RPC layer answers it with
- * `-32601 "Method not found"`.
- *
- * The reporter of #637 (SquirrelRat) inspected the suppressed child via
- * `tools/list` and read the JSON-RPC error as "the plugin never registers any
- * ctx_* tools" — when in fact the plugin DOES register all 11 tools natively
- * (verified at `src/adapters/opencode/plugin.ts:469` and
- * `tests/opencode-plugin.test.ts:88`). The misleading -32601 is the seed of
- * the #637 perception.
- *
- * This helper installs an explicit handler that returns `{tools: []}` — a
- * spec-compliant empty list. Paired with the existing #623 stderr diagnostic,
- * an operator now sees:
- *   - wire response: `{tools: []}` (matches expectation, no JSON-RPC error)
- *   - stderr: `[context-mode] ctx_* tools/list intentionally empty… (#623)`
- *
- * Idempotent: throws inside SDK if called twice on the same server because
- * `assertCanSetRequestHandler` (mcp.js:60) rejects duplicate registrations;
- * we therefore install the SDK's default tool handlers FIRST (via a no-op
- * registerTool of a fake tool, immediately removed) only if needed. To keep
- * the public surface minimal, we just call `server.server.setRequestHandler`
- * directly — that is the same low-level call used for prompts/resources at
- * server.ts:259-261 and avoids the SDK guard entirely.
- *
- * Exported for test (#637 in-memory regression guard).
- */
-export function registerEmptyToolsListHandler(target: McpServer = server): void {
-  target.server.registerCapabilities({ tools: { listChanged: false } });
-  target.server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [] }));
-}
-
 const originalRegisterTool = server.registerTool.bind(server);
 (server as unknown as { registerTool: (...args: unknown[]) => unknown }).registerTool = (...args: unknown[]) => {
   const [name, config, handler] = args as [
@@ -282,10 +156,6 @@ const originalRegisterTool = server.registerTool.bind(server);
     Record<string, unknown>,
     (toolArgs: Record<string, unknown>) => Promise<unknown> | unknown,
   ];
-  if (suppressMcpToolsForNativePluginHost) {
-    emitSuppressionDiagnostic();
-    return undefined;
-  }
   const wrappedHandler = wrapToolHandler(name, handler);
   REGISTERED_CTX_TOOLS.push({ name, config, handler: wrappedHandler });
   args[2] = wrappedHandler;
@@ -297,8 +167,6 @@ function wrapToolHandler(
   handler: (toolArgs: Record<string, unknown>) => Promise<unknown> | unknown,
 ): (toolArgs: Record<string, unknown>, extra?: { _meta?: Record<string, unknown> }) => Promise<unknown> {
   return async (toolArgs: Record<string, unknown>, extra?: { _meta?: Record<string, unknown> }) => {
-    // Initialization notifications do not wait for asynchronous adapter loading.
-    if (server.server.getClientVersion() && !_detectedAdapter) await getDiagnosticAdapter();
     const invoke = async () => {
       // Keep request context active through execution, tracking and error handling.
       noteRequestStart();
@@ -319,7 +187,7 @@ function wrapToolHandler(
         noteRequestEnd();
       }
     };
-    if (projectDirOverride.getStore() || detectPlatform(server.server.getClientVersion() ?? undefined).platform !== "codex") return invoke();
+    if (projectDirOverride.getStore()) return invoke();
     const explicitDir = process.env.CONTEXT_MODE_PROJECT_DIR_SOURCE === "cwd"
       ? undefined : process.env.CONTEXT_MODE_PROJECT_DIR;
     const context = resolveCodexRequestContext(extra?._meta, undefined, explicitDir);
@@ -328,17 +196,6 @@ function wrapToolHandler(
     }
     return withProjectDirOverride(context, invoke);
   };
-}
-
-// Issue #637 — when suppression is active, install the empty tools/list handler
-// once at module-init time so the suppressed MCP child responds with
-// `{tools: []}` instead of JSON-RPC `-32601 Method not found`. Pair with the
-// #623 stderr diagnostic that explains WHY the list is empty. Skipped for the
-// embedded plugin-import path because the embedded process is not the stdio
-// MCP child an operator would inspect — it lives inside the OpenCode/Kilo
-// host and never speaks JSON-RPC over stdio.
-if (suppressMcpToolsForNativePluginHost && process.env.CONTEXT_MODE_EMBEDDED_PLUGIN_TOOLS !== "1") {
-  registerEmptyToolsListHandler(server);
 }
 
 type ToolContextOverride = { projectDir: string; sessionId?: string };
@@ -466,7 +323,7 @@ export function currentAttribution(): { sessionId?: string } | undefined {
   // THIS project's session DB. Works for claude-code/cursor/gemini-cli/codex/
   // kiro/opencode/zed/kilo/openclaw/qwen-code/vscode-copilot/jetbrains-copilot/
   // omp/pi/antigravity — no adapter-specific transcript path required.
-  const sessionId = process.env.CLAUDE_SESSION_ID ?? resolveSessionIdFromSessionDB();
+  const sessionId = resolveSessionIdFromSessionDB();
   if (!sessionId) return undefined;
   return { sessionId };
 }
@@ -484,9 +341,7 @@ export function resolveSessionIdFromSessionDB(opts?: {
     return __cachedSessionId.sid;
   }
   try {
-    const projectDir = opts?.projectDir
-      ?? process.env.CLAUDE_PROJECT_DIR
-      ?? process.env.CONTEXT_MODE_PROJECT_DIR;
+    const projectDir = opts?.projectDir ?? getProjectDir();
     if (!projectDir) return undefined;
     const sessionsDir = opts?.sessionsDir ?? getSessionDir();
     const dbPath = resolveSessionDbPath({ projectDir, sessionsDir });
@@ -535,145 +390,33 @@ function maybeIndexSessionEvents(store: ContentStore): void {
   } catch { /* best-effort — session continuity never blocks tools */ }
 }
 
-// ── Platform-aware paths ──────────────────────────────────────────────────
-// The adapter (stored after MCP handshake) is the canonical source for
-// platform-specific paths. All session DB paths go through it — no
-// hardcoded configDir detection in tool handlers.
+// ── Codex storage ────────────────────────────────────────────────────────
+const _detectedAdapter: HookAdapter = new CodexAdapter();
 
-let _detectedAdapter: HookAdapter | null = null;
-
-/**
- * Resolve the Claude Code config root, honoring `CLAUDE_CONFIG_DIR` (incl.
- * leading `~`) before falling back to `~/.claude`. Mirrors
- * `hooks/session-helpers.mjs::resolveConfigDir` and
- * `ClaudeCodeAdapter.getConfigDir` so the pre-detection path agrees with
- * hooks/adapter on where Claude Code session data lives. See issue #453.
- *
- * Issue #460 round-3: delegates to the canonical util so empty/whitespace
- * env values fall back instead of poisoning downstream `join()` calls.
- */
-async function getDiagnosticAdapter(): Promise<HookAdapter | null> {
-  if (_detectedAdapter) return _detectedAdapter;
-  try {
-    const { getAdapter } = await import("./adapters/detect.js");
-    const clientInfo = server.server.getClientVersion();
-    const signal = detectPlatform(clientInfo ?? undefined);
-    // Only cache a selection once the SDK has received the initialize identity.
-    if (clientInfo) {
-      _detectedAdapter = await getAdapter(signal.platform);
-      console.error(`MCP client: ${clientInfo.name} v${clientInfo.version} → ${signal.platform}`);
-      return _detectedAdapter;
-    }
-    return await getAdapter(signal.platform);
-  } catch {
-    return null;
-  }
+async function getDiagnosticAdapter(): Promise<HookAdapter> {
+  return _detectedAdapter;
 }
 
-/**
- * Get the platform-specific sessions directory from the detected adapter.
- * Falls back to the detected platform config root before adapter detection.
- */
 function getDefaultSessionDir(): string {
-  if (_detectedAdapter) return _detectedAdapter.getSessionDir();
-  // Before adapter loading completes, use the SDK's verified identity when
-  // available and look up segments synchronously via
-  // getSessionDirSegments() (sync map, no adapter instantiation). This keeps
-  // non-Claude platforms from spilling sessions into ~/.claude/. For Claude
-  // Code/Codex (single-segment roots), reroute through their config-dir
-  // contracts so the pre-detection window does not split-state with hooks.
-  try {
-    const signal = detectPlatform(server.server.getClientVersion() ?? undefined);
-    const segments = getSessionDirSegments(signal.platform);
-    if (segments) {
-      return resolveDefaultSessionDir({
-        configDir: join(...segments),
-        configDirEnv: configDirEnvForSessionSegments(segments),
-      });
-    }
-  } catch { /* fall through to claude fallback */ }
-  return resolveDefaultSessionDir({ configDir: ".claude", configDirEnv: "CLAUDE_CONFIG_DIR" });
-}
-
-function configDirEnvForSessionSegments(segments: string[]): string | undefined {
-  if (segments.length === 1 && segments[0] === ".claude") return "CLAUDE_CONFIG_DIR";
-  if (segments.length === 1 && segments[0] === ".codex") return "CODEX_HOME";
-  return undefined;
+  return _detectedAdapter.getSessionDir();
 }
 
 function getSessionDir(): string {
   return ensureWritableStorageDir(resolveSessionStorageDir(getDefaultSessionDir));
 }
 
-/**
- * Project directory detection across supported platforms.
- *
- * Priority:
- *   1. Platform-specific env var (set by host IDE before MCP server spawn)
- *   2. CONTEXT_MODE_PROJECT_DIR (set by start.mjs for ALL platforms — universal)
- *   3. process.cwd() (last resort)
- *
- * CONTEXT_MODE_PROJECT_DIR guarantees correct projectDir even for platforms
- * that don't set their own env var (Cursor, OpenClaw, Codex, Kiro, Zed).
- */
+/** Resolve request identity first; keep the Codex fallback for startup paths. */
 export function getProjectDir(): string {
   const override = projectDirOverride.getStore();
   if (override) return override.projectDir;
 
-  // Delegated to the shared resolver so the env-var chain rejects plugin
-  // install paths (set by a prior MCP boot's start.mjs after `/ctx-upgrade`)
-  // and prefers the shell-set PWD before the chdir'd cwd. v1.0.115 adds
-  // the Claude Code transcript heuristic — read `cwd` from the most-recently-
-  // modified `~/.claude/projects/<encoded>/<session>.jsonl` to recover the
-  // real project dir when MCP was launched from a non-project cwd (desktop-
-  // app launch, /ctx-upgrade respawn). See src/util/project-dir.ts.
-  //
-  // Issue #521 (v1.0.119): the transcript heuristic ONLY applies on Claude
-  // Code. Other platforms (Cursor, OpenCode, Codex, ...) either have no
-  // transcript at that path or use a different schema without `cwd`. Worse,
-  // a Cursor user who also runs Claude Code would pick up the most-recently-
-  // modified Claude Code session's cwd — wrong project entirely. Gate the
-  // path on detected platform so non-Claude hosts skip the heuristic and
-  // fall through to PWD/cwd cleanly.
-  //
-  // The Claude heuristic must also be fresh. Hosts such as Pi can be
-  // misdetected as Claude Code solely because ~/.claude exists; without a
-  // freshness guard an old Claude transcript can globally hijack ctx shell cwd
-  // after reboot. Active Claude sessions update their transcript as the user
-  // interacts, so stale transcripts should fall through to PWD/cwd.
-  //
-  // Issue #545 (v1.0.124): pass strictPlatform for ALL adapters so the
-  // env-var cascade is built ALGORITHMICALLY from the platform's own
-  // workspace vars + universal escape hatch — foreign workspace vars (e.g.
-  // CLAUDE_PROJECT_DIR leaked into Pi's MCP child env from the user's shell)
-  // cannot win, regardless of cascade order. start.mjs intentionally does
-  // NOT pass strictPlatform — host detection is unreliable at the entrypoint
-  // and the legacy literal cascade is preserved there for semver safety.
-  let transcriptsRoot: string | undefined;
-  let strictPlatform: PlatformId | undefined;
-  let codexHome: string | undefined;
-  try {
-    const detected = detectPlatform().platform;
-    strictPlatform = detected;
-    if (detected === "claude-code") {
-      transcriptsRoot = join(homedir(), ".claude", "projects");
-    }
-    // Issue #45 — Codex publishes no workspace env var, so the resolver
-    // reads `meta.cwd` from the most-recently-modified session.jsonl under
-    // `${codexHome}/sessions/`. Wire codexHome at the call site so the
-    // resolver can be exercised under test without process-level mutation.
-    if (detected === "codex") {
-      codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex");
-    }
-  } catch { /* detection failure — leave undefined, resolver uses legacy cascade */ }
   return resolveProjectDir({
     env: process.env,
     cwd: process.cwd(),
     pwd: process.env.PWD,
-    transcriptsRoot,
     transcriptMaxAgeMs: 5 * 60 * 1000,
-    strictPlatform,
-    codexHome,
+    strictPlatform: "codex",
+    codexHome: resolveCodexConfigDir(),
   });
 }
 
@@ -791,135 +534,14 @@ function storageErrorResult(err: unknown): ToolResult | null {
     isError: true,
   };
 }
-// ── Version outdated warning ──────────────────────────────────────────────
-// Non-blocking npm check at startup. trackResponse prepends warning
-// using a burst cadence: 3 warnings → 1h silent → 3 warnings → repeat.
-
-let _latestVersion: string | null = null;
-let _warningBurstCount = 0;
-let _lastBurstStart = 0;
-const VERSION_BURST_SIZE = 3;
-const VERSION_SILENT_MS = 60 * 60 * 1000; // 1 hour
-
-async function fetchLatestVersion(): Promise<string> {
-  return new Promise((res) => {
-    const req = httpsRequest(
-      "https://registry.npmjs.org/context-mode/latest",
-      { headers: { Connection: "close" } },
-      (resp) => {
-        let raw = "";
-        resp.on("data", (chunk: Buffer) => { raw += chunk; });
-        resp.on("end", () => {
-          try {
-            const data = JSON.parse(raw) as { version?: string };
-            res(data.version ?? "unknown");
-          } catch { res("unknown"); }
-        });
-      },
-    );
-    req.on("error", () => res("unknown"));
-    req.setTimeout(5000, () => { req.destroy(); res("unknown"); });
-    req.end();
-  });
-}
-
-function getUpgradeHint(): string {
-  const name = _detectedAdapter?.name;
-  if (name === "Claude Code") return "/ctx-upgrade";
-  if (name === "OpenClaw") return "npm run install:openclaw";
-  if (name === "Pi") return "npm run build";
-  return "npm update -g context-mode";
-}
-
-function semverNewer(a: string, b: string): boolean {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
-  for (let i = 0; i < 3; i++) {
-    if ((pa[i] ?? 0) > (pb[i] ?? 0)) return true;
-    if ((pa[i] ?? 0) < (pb[i] ?? 0)) return false;
-  }
-  return false;
-}
-
-function isOutdated(): boolean {
-  if (!_latestVersion || _latestVersion === "unknown") return false;
-  return semverNewer(_latestVersion, VERSION);
-}
-
-function shouldShowVersionWarning(): boolean {
-  if (!isOutdated()) return false;
-  const now = Date.now();
-  // Start of a new burst?
-  if (_warningBurstCount >= VERSION_BURST_SIZE) {
-    if (now - _lastBurstStart < VERSION_SILENT_MS) return false; // still silent
-    _warningBurstCount = 0; // silence over, reset burst
-  }
-  if (_warningBurstCount === 0) _lastBurstStart = now;
-  _warningBurstCount++;
-  return true;
-}
-
-// ── Self-heal Layer 2: Mid-session registry heal (anthropics/claude-code#46915) ──
-// Runs once on first tool call. If Claude Code auto-updated the registry mid-session,
-// hooks break because CLAUDE_PLUGIN_ROOT points to a deleted directory. We create a
-// symlink from the broken path to our actual directory so hooks recover.
-let _cacheHealDone = false;
-function healCacheMidSession(): void {
-  if (_cacheHealDone) return;
-  _cacheHealDone = true;
-  try {
-    // Issue #460 round-3: honor $CLAUDE_CONFIG_DIR so users who relocate
-    // their CC config root don't have plugin cache healing operate against
-    // the wrong tree (and silently miss dangling-symlink cleanup).
-    const claudeRoot = resolveClaudeConfigDir();
-    const ipPath = resolve(claudeRoot, "plugins", "installed_plugins.json");
-    if (!existsSync(ipPath)) return;
-    const ip = JSON.parse(readFileSync(ipPath, "utf-8"));
-    const cacheRoot = resolve(claudeRoot, "plugins", "cache");
-    // Issue #795: canonicalize cacheRoot so the traversal guard works when
-    // ~/.claude is a symlink to another volume.  path.resolve() does not
-    // dereference symlinks, so installPath values stored as physical paths
-    // (e.g. /Volumes/SSD/.../plugins/cache/...) would fail the startsWith
-    // check against a symlink-path cacheRoot (/Users/me/.claude/...).
-    // realpathSync follows the symlink chain to the canonical location.
-    let cacheRootCanon: string;
-    try { cacheRootCanon = realpathSync(cacheRoot); }
-    catch { cacheRootCanon = cacheRoot; }
-    // Plugin root: build/ for tsc, plugin root for bundle
-    const pluginRoot = getPackageRoot();
-    for (const [key, entries] of Object.entries((ip.plugins ?? {}) as Record<string, Array<{ installPath?: string }>>)) {
-      if (key !== "context-mode@context-mode") continue;
-      for (const entry of entries) {
-        const rp = entry.installPath;
-        if (!rp || existsSync(rp)) continue;
-        // Path traversal guard (canonical comparison — see #795)
-        if (!resolve(rp).startsWith(cacheRootCanon + sep)) continue;
-        // Remove dangling symlink
-        try { if (lstatSync(rp).isSymbolicLink()) unlinkSync(rp); } catch {}
-        const parent = dirname(rp);
-        if (!existsSync(parent)) mkdirSync(parent, { recursive: true });
-        if (existsSync(pluginRoot)) {
-          symlinkSync(pluginRoot, rp, process.platform === "win32" ? "junction" : undefined);
-        }
-      }
-    }
-  } catch { /* best effort */ }
-}
+// This fork never checks npm upstream for release or upgrade decisions.
+const _latestVersion: null = null;
 
 function trackResponse(toolName: string, response: ToolResult): ToolResult {
   // #854: a response is activity too — refresh the bridge-child idle clock so a
   // chatty/streaming call keeps its server alive even between inbound frames.
   noteMcpActivity();
   // Mid-session cache heal — one-shot, first tool call
-  healCacheMidSession();
-  // Prepend version outdated warning if needed
-  if (shouldShowVersionWarning() && response.content.length > 0) {
-    const hint = getUpgradeHint();
-    response.content[0].text =
-      `⚠️ context-mode v${VERSION} outdated → v${_latestVersion} available. Upgrade: ${hint}\n\n` +
-      response.content[0].text;
-  }
-
   const bytes = response.content.reduce(
     (sum, c) => sum + Buffer.byteLength(c.text),
     0,
@@ -1515,14 +1137,8 @@ function truncateCommandForEcho(command: string): string {
  * run). A caller can still pass an explicit `timeout` to override on any host.
  */
 export const AGY_DEFAULT_EXEC_TIMEOUT_MS = 120_000;
-export function resolveExecTimeout(timeout: number | undefined): number | undefined {
-  if (timeout !== undefined) return timeout;
-  // Only agy gets a default — every other host enforces its own RPC timeout, so
-  // keep the unbounded behavior there. Detected via the env the agy bundle pins
-  // (CONTEXT_MODE_PLATFORM=antigravity-cli). Tunable via CONTEXT_MODE_AGY_EXEC_TIMEOUT_MS.
-  if (detectPlatform().platform !== "antigravity-cli") return undefined;
-  const override = Number(process.env.CONTEXT_MODE_AGY_EXEC_TIMEOUT_MS);
-  return Number.isFinite(override) && override > 0 ? override : AGY_DEFAULT_EXEC_TIMEOUT_MS;
+function resolveExecTimeout(timeout: number | undefined): number | undefined {
+  return timeout;
 }
 
 /**
@@ -2725,7 +2341,7 @@ EXAMPLE: ctx_search(queries: ["last user prompt", "active skills", "open blocker
         } catch { /* best-effort */ }
       }
 
-      const configDir = _detectedAdapter?.getConfigDir() ?? resolveClaudeConfigDir();
+      const configDir = resolveCodexConfigDir();
 
       try {
       for (const q of queryList) {
@@ -4010,7 +3626,7 @@ server.registerTool(
           // headline. Best-effort — failures absorbed so a corrupt
           // sidecar in any adapter dir cannot break ctx_stats.
           let multiAdapter;
-          try { multiAdapter = getMultiAdapterLifetimeStats(); } catch { /* never block ctx_stats */ }
+          // Codex-only: lifetime is already scoped to getSessionDir().
           // F1: wire conversation + realBytes opts so formatReport renders the
           // narrative 5-section "kitap gibi" layout (timeline, ladder, receipt,
           // example cost, auto-memory). Without these, formatReport falls back
@@ -4020,7 +3636,7 @@ server.registerTool(
           let conversation;
           let realBytes;
           try {
-            let sid = process.env.CLAUDE_SESSION_ID;
+            let sid = currentAttribution()?.sessionId;
             if (!sid) {
               const row = sdb.prepare(
                 "SELECT session_id FROM session_events WHERE session_id LIKE '________-____-____-____-____________' ORDER BY created_at DESC LIMIT 1"
@@ -4134,7 +3750,7 @@ server.registerTool(
           patchPiLifetimeFromStatsFiles(lifetime, getSessionDir());
         }
         let multiAdapter;
-        try { multiAdapter = getMultiAdapterLifetimeStats(); } catch { /* never block ctx_stats */ }
+        // Codex-only: lifetime is already scoped to getSessionDir().
         let indexState;
         try { indexState = getStore().getIndexState(); } catch { /* never block ctx_stats */ }
         text = formatReport(report, VERSION, _latestVersion, { lifetime, multiAdapter, indexState });
@@ -4149,7 +3765,7 @@ server.registerTool(
         patchPiLifetimeFromStatsFiles(lifetime, getSessionDir());
       }
       let multiAdapter;
-      try { multiAdapter = getMultiAdapterLifetimeStats(); } catch { /* never block ctx_stats */ }
+      // Codex-only: lifetime is already scoped to getSessionDir().
       text = formatReport(report, VERSION, _latestVersion, (lifetime || multiAdapter) ? { lifetime, multiAdapter } : undefined);
     }
 
@@ -4187,16 +3803,7 @@ server.registerTool(
     // safe across all MCP renderers — using plain-text status prefixes
     // (`[OK]` / `[FAIL]` / `[WARN]`) instead.
     const lines: string[] = ["context-mode doctor", ""];
-    let currentPlatform: PlatformId | undefined;
-    try {
-      currentPlatform = detectPlatform(server.server.getClientVersion() ?? undefined).platform;
-    } catch {
-      currentPlatform = detectPlatform().platform;
-    }
-    // __pkg_dir is build/ for tsc, plugin root for bundle — resolve to plugin root.
-    // Codex is special: when plugin-manager runtime root differs from the
-    // current package root, diagnose the root Codex will actually execute.
-    const pluginRoot = getRuntimeAwarePackageRoot(currentPlatform);
+    const pluginRoot = getRuntimeAwarePackageRoot();
 
     // Runtimes
     const total = 11;
@@ -4294,160 +3901,15 @@ server.registerTool(
 server.registerTool(
   "ctx_upgrade",
   {
-    title: "Upgrade Plugin",
-    // #846: an action tool (returns an upgrade command to run); not read-only,
-    // but non-destructive and idempotent. No direct network from the call.
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-    description:
-      "Upgrade context-mode to the latest version. Returns a shell command to execute. " +
-      "You MUST run the returned command using your shell tool (Bash, shell_execute, " +
-      "run_in_terminal, etc.) and display the output as a checklist. " +
-      "Tell the user to restart their session after upgrade.",
+    title: "Self-upgrade Disabled",
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: "Self-upgrade is disabled for this fork. Use an explicitly reviewed local release; no upgrade command is generated.",
     inputSchema: z.object({}),
   },
-  async () => {
-    // Issue #542 — thread MCP clientInfo into the spawned upgrade
-    // process. detectPlatform() runs IN-PROCESS here (no spawn boundary)
-    // so clientInfo from the MCP handshake is the highest-confidence
-    // signal available. We forward the resolved PlatformId as a
-    // --platform flag (cross-shell safe on POSIX, Git Bash, PowerShell,
-    // and cmd.exe — unlike env-var prefixes). If detection fails we
-    // skip the flag and let upgrade()'s own detectPlatform() fall back.
-    let platformFlag = "";
-    let nodeOpts: { platform: string; jsRuntime: string } | undefined =
-      undefined;
-    let platformId: PlatformId | undefined;
-    try {
-      const clientInfo = server.server.getClientVersion();
-      const signal = detectPlatform(clientInfo ?? undefined);
-      platformId = signal.platform;
-      platformFlag = ` --platform ${signal.platform}`;
-      nodeOpts = isInProcessPluginPlatform(signal.platform) && runtimes.javascript
-        ? { platform: signal.platform, jsRuntime: runtimes.javascript }
-        : undefined;
-    } catch {
-      try { platformId = detectPlatform().platform; } catch { /* best effort — fall back to upgrade()'s own detect */ }
-    }
-
-    // __pkg_dir is build/ for tsc, plugin root for bundle — resolve to plugin root.
-    // Only Codex may replace it with the plugin-manager runtime root; other
-    // adapters can coexist with Codex on the same machine.
-    const pluginRoot = getRuntimeAwarePackageRoot(platformId);
-    const bundlePath = resolve(pluginRoot, "cli.bundle.mjs");
-    const fallbackPath = resolve(pluginRoot, "build", "cli.js");
-
-    // Insight pivoted to the hosted dashboard (context-mode.com/insight), so
-    // ctx_insight no longer builds a local cache. On upgrade, sweep the legacy
-    // insight-cache and stop any stale local dashboard left from old versions.
-    try {
-      const sessDir = getSessionDir();
-      const insightCacheDir = join(dirname(sessDir), "insight-cache");
-      if (existsSync(insightCacheDir)) {
-        // Kill any running insight server first via the shared helper —
-        // this is locale-independent on Windows (PR #469) and isolates per-pid
-        // failures. We ignore the structured result: cache cleanup is
-        // best-effort and must never block ctx_upgrade.
-        killProcessOnPort(4747);
-        rmSync(insightCacheDir, { recursive: true, force: true });
-      }
-    } catch { /* best effort — don't block upgrade */ }
-
-
-    let cmd: string;
-
-    if (existsSync(bundlePath)) {
-      cmd = `${buildNodeCommand(bundlePath, nodeOpts)} upgrade${platformFlag}`;
-    } else if (existsSync(fallbackPath)) {
-      cmd = `${buildNodeCommand(fallbackPath, nodeOpts)} upgrade${platformFlag}`;
-    } else {
-      // Inline fallback: neither CLI file exists (e.g. marketplace installs).
-      // Generate a self-contained node -e script that performs the upgrade.
-      const repoUrl = "https://github.com/mksglu/context-mode.git";
-      // Write inline script to a temp .mjs file — avoids quote-escaping issues
-      // across cmd.exe, PowerShell, and bash (node -e '...' breaks on Windows).
-      const scriptLines = [
-        `import{execFileSync}from"node:child_process";`,
-        `import{cpSync,rmSync,existsSync,mkdtempSync,readFileSync,writeFileSync,lstatSync}from"node:fs";`,
-        `import{join,resolve,sep}from"node:path";`,
-        `import{tmpdir}from"node:os";`,
-        `const P=${JSON.stringify(pluginRoot)};`,
-        `const T=mkdtempSync(join(tmpdir(),"ctx-upgrade-"));`,
-        `try{`,
-        `console.log("- [x] Starting inline upgrade (no CLI found)");`,
-        `execFileSync("git",["clone","--depth","1","${repoUrl}",T],{stdio:"inherit"});`,
-        `console.log("- [x] Cloned latest source");`,
-        `execFileSync(process.platform==="win32"?"npm.cmd":"npm",["install"],{cwd:T,stdio:"inherit",shell:process.platform==="win32"});`,
-        `execFileSync(process.platform==="win32"?"npm.cmd":"npm",["run","build"],{cwd:T,stdio:"inherit",shell:process.platform==="win32"});`,
-        `console.log("- [x] Built from source");`,
-        `const pkg=JSON.parse(readFileSync(join(T,"package.json"),"utf8"));`,
-        `const items=[...(Array.isArray(pkg.files)?pkg.files:[]),"src","package.json"];`,
-        // Supply-chain containment on items[]. Mirror the cli.ts upgrade()
-        // guard: a compromised upstream package.json with files:["../etc"]
-        // would otherwise let path.join follow ".." out of pluginRoot.
-        // path.resolve normalizes "..", so the lexical startsWith catches
-        // both relative-".." traversal and absolute-path bypass. Plus a
-        // symlink filter so a committed symlink inside the clone can't
-        // plant itself in pluginRoot (cpSync default preserves source
-        // symlinks; a planted symlink in pluginRoot/src then redirects
-        // every subsequent load through to an attacker target).
-        `const PW=resolve(P)+sep;const TW=resolve(T)+sep;`,
-        `const noSymlink=(src)=>{try{return !lstatSync(src).isSymbolicLink()}catch{return false}};`,
-        `for(const item of items){const from=resolve(T,item);const to=resolve(P,item);if(!(to+sep).startsWith(PW))continue;if(!(from+sep).startsWith(TW))continue;if(!noSymlink(from))continue;if(existsSync(from)){rmSync(to,{recursive:true,force:true});cpSync(from,to,{recursive:true,force:true,filter:noSymlink});}}`,
-        // Issue #609: do NOT write .mcp.json into the cache dir. Claude Code reads
-        // .claude-plugin/plugin.json.mcpServers as the canonical MCP source — the
-        // per-version .mcp.json file is a stale-write vector. Same architectural
-        // fix as the cli.ts upgrade() path; both writers were the only producers.
-        `console.log("- [x] Copied package files");`,
-        `execFileSync(process.platform==="win32"?"npm.cmd":"npm",["install","--production"],{cwd:P,stdio:"inherit",shell:process.platform==="win32"});`,
-        `console.log("- [x] Installed production dependencies");`,
-        `console.log("## context-mode upgrade complete");`,
-        `}catch(e){`,
-        `console.error("- [ ] Upgrade failed:",e.message);`,
-        `process.exit(1);`,
-        `}finally{`,
-        `try{rmSync(T,{recursive:true,force:true})}catch{}`,
-        `}`,
-      ].join("\n");
-
-      // Server writes the temp script file — avoids shell quoting issues entirely
-      const tmpScript = resolve(pluginRoot, ".ctx-upgrade-inline.mjs");
-      const { writeFileSync: writeTmp } = await import("node:fs");
-      writeTmp(tmpScript, scriptLines);
-      cmd = buildNodeCommand(tmpScript, nodeOpts);
-    }
-
-    const text = [
-      "## ctx-upgrade",
-      "",
-      "Run this command using your shell execution tool:",
-      "",
-      "```",
-      cmd,
-      "```",
-      "",
-      "After the command completes, display results as a markdown checklist:",
-      "- `[x]` for success, `[ ]` for failure",
-      "- Example format:",
-      "  ```",
-      "  ## context-mode upgrade",
-      "  - [x] Pulled latest from GitHub",
-      "  - [x] Built and installed v0.9.24",
-      "  - [x] npm global updated",
-      "  - [x] Hooks configured",
-      "  - [x] Doctor: all checks PASS",
-      "  ```",
-      "- Tell the user to restart their session to pick up the new version.",
-    ].join("\n");
-
-    return trackResponse("ctx_upgrade", {
-      content: [{ type: "text" as const, text }],
-    });
-  },
+  async () => trackResponse("ctx_upgrade", {
+    isError: true,
+    content: [{ type: "text", text: "Self-upgrade is disabled for this fork; use an explicitly reviewed local release. No upgrade command was generated." }],
+  }),
 );
 
 // ── ctx-purge: explicit knowledge base wipe ─────────────────────────────────
@@ -4918,7 +4380,6 @@ async function main() {
   // Lifecycle guard: detect parent death + stdin close to prevent orphaned processes (#103)
   startLifecycleGuard({ onShutdown: () => gracefulShutdown() });
 
-  server.server.oninitialized = () => { void getDiagnosticAdapter(); };
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
@@ -4963,16 +4424,6 @@ async function main() {
       }
     }
   } catch { /* best effort — never block startup on a stats restore failure */ }
-
-  // Non-blocking version check — result stored for trackResponse warnings.
-  // First fetch at startup, then refresh every hour so long-running sessions
-  // (some users keep the MCP server alive 24h+) catch new releases without a
-  // restart. `.unref()` lets the process exit normally on SIGTERM regardless
-  // of pending intervals.
-  fetchLatestVersion().then(v => { if (v !== "unknown") _latestVersion = v; });
-  setInterval(() => {
-    fetchLatestVersion().then(v => { if (v !== "unknown") _latestVersion = v; });
-  }, 60 * 60 * 1000).unref();
 
   // Stats heartbeat — keep the statusline truthful while the user works in
   // tools other than MCP (Bash/Read/Edit during long sessions or post-/compact

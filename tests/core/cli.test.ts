@@ -3604,7 +3604,7 @@ describe("better-sqlite3 binding self-heal (#408)", () => {
     expect(ftsAnchor).toBeGreaterThan(-1);
     const catchIdx = CLI_SRC.indexOf("catch (err", ftsAnchor);
     expect(catchIdx).toBeGreaterThan(-1);
-    const versionIdx = CLI_SRC.indexOf("Checking versions", catchIdx);
+    const versionIdx = CLI_SRC.indexOf("Checking local versions", catchIdx);
     expect(versionIdx).toBeGreaterThan(catchIdx);
     return CLI_SRC.slice(catchIdx, versionIdx);
   }

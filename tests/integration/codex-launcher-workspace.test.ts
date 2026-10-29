@@ -12,7 +12,7 @@ const alpha = "11111111-1111-4111-8111-111111111111";
 const beta = "22222222-2222-4222-8222-222222222222";
 const unknown = "99999999-9999-4999-8999-999999999999";
 const clients: Client[] = [];
-const clientPaths = new Map<Client, { codexHome: string; claudeConfigDir: string }>();
+const clientPaths = new Map<Client, { codexHome: string; claudeConfigDir: string; stderr: () => string }>();
 let root: string;
 let pluginDir: string;
 let repoA: string;
@@ -66,6 +66,15 @@ async function launch(
     HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: join(home, ".claude"),
     CODEX_HOME: codexHome, VITEST: "true",
   }, options.platform === null ? {} : { CONTEXT_MODE_PLATFORM: options.platform ?? "codex" }, overrides);
+  const networkGuard = join(home, "no-upstream.cjs");
+  writeFileSync(networkGuard, `
+    const blocked = () => { console.error('UNEXPECTED_UPSTREAM_CALL'); throw new Error('UNEXPECTED_UPSTREAM_CALL'); };
+    require('node:https').request = blocked;
+    require('node:https').get = blocked;
+    globalThis.fetch = blocked;
+    require('node:module').syncBuiltinESMExports();
+  `);
+  env.NODE_OPTIONS = `${env.NODE_OPTIONS ?? ""} --require "${networkGuard.replace(/\\/g, "/")}"`;
   const transport = new StdioClientTransport({
     command: process.execPath, args: [join(pluginDir, "start.mjs")],
     cwd: repoB, env, stderr: "pipe",
@@ -74,7 +83,7 @@ async function launch(
   transport.stderr?.on("data", chunk => { stderr += chunk.toString(); });
   const client = new Client({ name: options.clientName ?? "codex-launcher-regression", version: "1.0.0" });
   clients.push(client);
-  clientPaths.set(client, { codexHome, claudeConfigDir: env.CLAUDE_CONFIG_DIR });
+  clientPaths.set(client, { codexHome, claudeConfigDir: env.CLAUDE_CONFIG_DIR, stderr: () => stderr });
   try {
     await client.connect(transport);
   } catch (cause) {
@@ -95,6 +104,17 @@ async function probe(client: Client, threadId?: unknown) {
 }
 
 describe("Codex workspace routing through production start.mjs", () => {
+  it("does not generate an upstream upgrade command through MCP", async () => {
+    const client = await launch({}, { clientName: "codex-mcp-client", platform: null });
+    const result = await client.callTool({ name: "ctx_upgrade", _meta: { threadId: alpha }, arguments: {} });
+    expect(result.isError).toBe(true);
+    const output = (result.content as Array<{ text?: string }>).map(c => c.text ?? "").join("\n");
+    expect(output).toContain("Self-upgrade is disabled for this fork");
+    expect(output).toContain("No upgrade command was generated");
+    expect(output).not.toMatch(/git clone|npm (?:install|update)|https:\/\/github\.com/);
+    expect(clientPaths.get(client)!.stderr()).not.toContain("UNEXPECTED_UPSTREAM_CALL");
+  });
+
   it.each(["Codex", "codex-mcp-client"])("routes %s threads without a platform override", async (clientName) => {
     const client = await launch({}, { clientName, platform: null });
     const [a, b] = await Promise.all([probe(client, alpha), probe(client, beta)]);
@@ -149,40 +169,29 @@ describe("Codex workspace routing through production start.mjs", () => {
     expect(readdirSync(claudeSessions).some(name => /\.db(?:-wal|-shm)?$/.test(name))).toBe(false);
   });
 
-  it("preserves legacy environment detection for an unknown MCP client", async () => {
+  it("routes unknown MCP clients through Codex thread identity", async () => {
     const result = await probe(await launch({}, { platform: null }), alpha);
     expect(result.isError).not.toBe(true);
-    expect(result.text).toContain(`CWD_RESULT=${repoB}`);
+    expect(result.text).toContain(`CWD_RESULT=${repoA}`);
   });
 
-  it.each([
-    ["claude-code", ".claude"],
-    ["gemini-cli-mcp-client", ".gemini"],
-  ])("keeps %s content storage in its own adapter root", async (clientName, configDir) => {
+  it.each(["claude-code", "gemini-cli-mcp-client"])("uses only CODEX_HOME even for %s client identity", async (clientName) => {
     const client = await launch({}, { clientName, platform: null });
     const { codexHome, claudeConfigDir } = clientPaths.get(client)!;
-    const dataRoot = join(dirname(claudeConfigDir), configDir, "context-mode");
-    const sessions = join(dataRoot, "sessions");
-    mkdirSync(sessions, { recursive: true });
-    const snapshot = join(sessions, `${hashProjectDirCanonical(repoB)}-events.md`);
-    writeFileSync(snapshot, "# Platform continuity\n\nPlatformIsolation NON_CODEX_CONTINUITY\n");
-    const index = await client.callTool({ name: "ctx_index", arguments: { content: "PlatformIsolation NON_CODEX_INDEXED", source: "platform-fixture" } });
+    expect((await probe(client)).isError).toBe(true);
+    const index = await client.callTool({ name: "ctx_index", _meta: { threadId: alpha }, arguments: { content: "CodexOnly platform fixture", source: "codex-only" } });
     expect(index.isError).not.toBe(true);
-    const result = await client.callTool({ name: "ctx_search", arguments: { queries: ["PlatformIsolation"], source: "session-events" } });
-    expect(result.isError).not.toBe(true);
-    const output = (result.content as Array<{ text?: string }>).map(c => c.text ?? "").join("\n");
-    expect(output).toContain("NON_CODEX_CONTINUITY");
-    const contentDb = join(dataRoot, "content", `${hashProjectDirCanonical(repoB)}.db`);
+    const contentDb = join(codexHome, "context-mode", "content", `${hashProjectDirCanonical(repoA)}.db`);
     expect(readFileSync(contentDb).subarray(0, 16).toString()).toBe("SQLite format 3\0");
-    expect(existsSync(snapshot)).toBe(false);
-    expect(existsSync(join(codexHome, "context-mode", "content"))).toBe(false);
+    expect(existsSync(join(claudeConfigDir, "context-mode", "content"))).toBe(false);
+    expect(existsSync(join(dirname(claudeConfigDir), ".gemini", "context-mode", "content"))).toBe(false);
   });
 
-  it("keeps verified non-Codex client identity ahead of a conflicting platform override", async () => {
-    const client = await launch({}, { clientName: "claude-code", platform: "codex" });
+  it("ignores conflicting host identity and platform overrides", async () => {
+    const client = await launch({}, { clientName: "claude-code", platform: "gemini-cli" });
     const result = await probe(client, alpha);
     expect(result.isError).not.toBe(true);
-    expect(result.text).toContain(`CWD_RESULT=${repoB}`);
+    expect(result.text).toContain(`CWD_RESULT=${repoA}`);
   });
 
   it("does not treat tool metadata as verified MCP client identity", async () => {
@@ -193,7 +202,7 @@ describe("Codex workspace routing through production start.mjs", () => {
     });
     expect(result.isError).not.toBe(true);
     const output = (result.content as Array<{ text?: string }>).map(c => c.text ?? "").join("\n");
-    expect(output).toContain(`CWD_RESULT=${repoB}`);
+    expect(output).toContain(`CWD_RESULT=${repoA}`);
   });
 
   it("rejects a missing identity instead of trusting the launcher's inferred CWD", async () => {
