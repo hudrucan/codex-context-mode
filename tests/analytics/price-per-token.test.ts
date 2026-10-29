@@ -28,23 +28,8 @@ afterEach(() => {
   delete process.env[ENV_NAME];
 });
 
-describe("pricePerToken() — dynamic env resolution (PR #741 follow-up)", () => {
+describe("pricePerToken() — Codex default estimate (PR #741 follow-up)", () => {
   it("returns the Opus 4.7/4.8 input fallback ($5/1M) when env is unset", () => {
-    delete process.env[ENV_NAME];
-    expect(pricePerToken()).toBeCloseTo(5 / 1_000_000, 15);
-  });
-
-  it("reads PI_CONTEXT_MODE_PRICE_OUTPUT_PER_TOKEN when set AFTER module load", () => {
-    // This is the key invariant: import happened above (env unset), but
-    // a later setter must be honored on the next call. A frozen const
-    // would still report the Opus fallback here.
-    process.env[ENV_NAME] = "0.000003"; // Sonnet 4.6 rate, $3/1M
-    expect(pricePerToken()).toBeCloseTo(0.000003, 12);
-  });
-
-  it("switches back to the fallback when env is cleared mid-run", () => {
-    process.env[ENV_NAME] = "0.000001"; // Haiku 4.5, $1.00/1M
-    expect(pricePerToken()).toBeCloseTo(0.000001, 12);
     delete process.env[ENV_NAME];
     expect(pricePerToken()).toBeCloseTo(5 / 1_000_000, 15);
   });
@@ -54,13 +39,6 @@ describe("pricePerToken() — dynamic env resolution (PR #741 follow-up)", () =>
       process.env[ENV_NAME] = bad;
       expect(pricePerToken()).toBeCloseTo(5 / 1_000_000, 15);
     }
-  });
-
-  it("tokensToUsd() picks up the dynamic rate on every call", () => {
-    process.env[ENV_NAME] = "0.000001"; // $1/1M — easy to verify
-    expect(tokensToUsd(1_000_000)).toBe("$1.00");
-    process.env[ENV_NAME] = "0.000010"; // $10/1M
-    expect(tokensToUsd(1_000_000)).toBe("$10.00");
   });
 
   it("OPUS_INPUT_PRICE_PER_TOKEN back-compat alias resolves to $5/1M (Opus 4.7/4.8)", () => {

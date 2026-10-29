@@ -10,11 +10,9 @@
 import { describe, expect, test } from "vitest";
 import { formatReport, tokensToUsd } from "../../src/session/analytics.js";
 import type {
-  AdapterScanResult,
   ConversationStats,
   FullReport,
   LifetimeStats,
-  MultiAdapterLifetimeStats,
 } from "../../src/session/analytics.js";
 
 function baseReport(): FullReport {
@@ -242,31 +240,10 @@ describe("formatReport — Bugs #5/#6/#7/#8", () => {
       firstEventMs: Date.UTC(2026, 2, 4),
       distinctProjects: 123,
     };
-    const ma: MultiAdapterLifetimeStats = {
-      totalEvents: 17_493,
-      totalSessions: 128,
-      totalBytes: 356 * 1024 * 1024,
-      perAdapter: [
-        {
-          name: "claude-code",
-          eventCount: 17_493,
-          sessionCount: 128,
-          dataBytes: 356 * 1024 * 1024,
-          rescueBytes: 1552 * 1024,
-          contentBytes: 0,
-          uuidConvs: 128,
-          projectDirs: new Array(123).fill(0).map((_, i) => `/p/${i}`),
-          firstMs: Date.UTC(2026, 2, 4),
-          lastMs:  Date.UTC(2026, 4, 10),
-          isReal: true,
-        } satisfies AdapterScanResult,
-      ],
-    };
 
     const text = formatReport(baseReport(), "1.0.111", null, {
       conversation: conv,
       lifetime,
-      multiAdapter: ma,
       realBytes: {
         // Lifetime: ~93.3M tokens (target's 356 MB / ~3.81 ratio).
         lifetime: {

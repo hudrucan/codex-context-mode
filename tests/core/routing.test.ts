@@ -10,10 +10,10 @@ import { createToolNamer } from "../../hooks/core/tool-naming.mjs";
 // Subagent routing uses createRoutingBlock(t, { includeCommands: false }).
 // For claude-code (incl. the default when platform is unset) it also enables the
 // ToolSearch bootstrap so deferred ctx_* tools are loadable by the subagent (#724).
-const _t = createToolNamer("claude-code");
+const _t = createToolNamer("codex");
 const SUBAGENT_BLOCK = createRoutingBlock(_t, {
   includeCommands: false,
-  toolSearchBootstrap: true,
+  toolSearchBootstrap: false,
 });
 
 describe("Routing: Subagents (Agent only — Task removed per #241)", () => {
@@ -69,14 +69,6 @@ describe("Routing: Subagents (Agent only — Task removed per #241)", () => {
     expect(prompt).toContain("label");
     expect(prompt).toContain("descriptive");
     expect(prompt).toContain("FTS5 chunk title");
-  });
-
-  it("Agent block includes the ToolSearch bootstrap for deferred ctx_* tools on claude-code (#724)", () => {
-    const decision = routePreToolUse("Agent", { prompt: "test" }, "/test", "claude-code");
-    const prompt = decision.updatedInput.prompt;
-    expect(prompt).toContain("deferred_tool_bootstrap");
-    expect(prompt).toContain("ToolSearch");
-    expect(prompt).toContain("select:mcp__plugin_context-mode_context-mode__ctx_batch_execute");
   });
 
   it("Agent block omits the ToolSearch bootstrap on platforms without deferred tools (#724)", () => {

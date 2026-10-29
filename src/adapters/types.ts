@@ -1,5 +1,5 @@
 /**
- * adapters/types — Platform adapter interface for multi-platform hook support.
+ * adapters/types — Codex hook contracts and runtime command helpers.
  *
  * Defines the contract that each platform adapter must implement.
  * Three paradigms exist across supported platforms:
@@ -380,12 +380,6 @@ export function buildNodeCommand(
   opts?: { platform?: string; jsRuntime?: string },
 ): string {
   let nodePath = process.execPath.replace(/\\/g, "/");
-  if (isInProcessPluginPlatform(opts?.platform)) {
-    const base = nodePath.split("/").pop()!.replace(/\.exe$/i, "");
-    if (!JS_RUNTIMES.has(base)) {
-      nodePath = opts?.jsRuntime?.replace(/\\/g, "/") ?? "node";
-    }
-  }
   const safePath = scriptPath.replace(/\\/g, "/");
   return `"${nodePath}" "${safePath}"`;
 }
@@ -421,9 +415,6 @@ export function buildHookRuntimeCommand(
 ): string {
   // In-process plugin platforms (opencode/kilo) inject their own runtime —
   // delegate to buildNodeCommand which already handles that special case.
-  if (isInProcessPluginPlatform(opts?.platform)) {
-    return buildNodeCommand(scriptPath, opts);
-  }
   const runtime = resolveHookRuntime();
   const runtimePath = runtime.path.replace(/\\/g, "/");
   const safePath = scriptPath.replace(/\\/g, "/");
@@ -462,42 +453,3 @@ export function parseNodeCommand(
 
 /** Known JS runtime binary names (base filename without extension). */
 export const JS_RUNTIMES: ReadonlySet<string> = new Set(["node", "bun", "deno"]);
-
-/** Platforms where context-mode runs as an in-process TS plugin (not MCP stdio). */
-export const IN_PROCESS_PLUGIN_PLATFORMS: ReadonlySet<string> = new Set(["opencode", "kilo"]);
-
-export function isInProcessPluginPlatform(p: string | undefined): boolean {
-  return !!p && IN_PROCESS_PLUGIN_PLATFORMS.has(p);
-}
-
-/** Supported platform identifiers. */
-export type PlatformId =
-  | "claude-code"
-  | "gemini-cli"
-  | "opencode"
-  | "kilo"
-  | "openclaw"
-  | "codex"
-  | "vscode-copilot"
-  | "jetbrains-copilot"
-  | "copilot-cli"
-  | "cursor"
-  | "antigravity"
-  | "antigravity-cli"
-  | "kiro"
-  | "pi"
-  | "omp"
-  | "kimi"
-  | "zed"
-  | "qwen-code"
-  | "unknown";
-
-/** Detection signal used to identify which platform is running. */
-export interface DetectionSignal {
-  /** Platform identifier. */
-  platform: PlatformId;
-  /** Confidence: env var match > config dir match > fallback. */
-  confidence: "high" | "medium" | "low";
-  /** How it was detected. */
-  reason: string;
-}

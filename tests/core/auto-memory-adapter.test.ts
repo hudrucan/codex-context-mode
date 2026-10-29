@@ -6,12 +6,11 @@ import { join } from "node:path";
 
 import { searchAutoMemory } from "../../src/search/auto-memory.js";
 import { CodexAdapter } from "../../src/adapters/codex/index.js";
-import { GeminiCLIAdapter } from "../../src/adapters/gemini-cli/index.js";
 
 /**
  * Slice 4 — searchAutoMemory accepts an adapter and uses its
  * getInstructionFiles() / getMemoryDir() / getConfigDir() instead of
- * hardcoded ~/.claude / CLAUDE.md.
+ * hardcoded ~/.claude / AGENTS.md.
  *
  * Without an adapter it falls back to the historical Claude defaults
  * (so existing call sites keep working).
@@ -80,9 +79,9 @@ describe("searchAutoMemory adapter dispatch", () => {
     expect(results[0].source).toContain("decisions.md");
   });
 
-  it("falls back to CLAUDE.md scan when no adapter is provided", () => {
+  it("falls back to AGENTS.md scan when no adapter is provided", () => {
     writeFileSync(
-      join(projectDir, "CLAUDE.md"),
+      join(projectDir, "AGENTS.md"),
       "Project notes mention GAMMA-FALLBACK-FLAG repeatedly.\n",
       "utf-8",
     );
@@ -90,7 +89,7 @@ describe("searchAutoMemory adapter dispatch", () => {
     const results = searchAutoMemory(["GAMMA-FALLBACK-FLAG"], 5, projectDir);
 
     expect(results.length).toBeGreaterThan(0);
-    expect(results[0].source).toBe("project/CLAUDE.md");
+    expect(results[0].source).toBe("project/AGENTS.md");
   });
 
   it("scans multiple instruction files when adapter declares multiple (e.g. AGENTS.md + AGENTS.override.md)", () => {
@@ -111,25 +110,6 @@ describe("searchAutoMemory adapter dispatch", () => {
 
     expect(results.length).toBeGreaterThan(0);
     expect(results[0].source).toContain("AGENTS.override.md");
-  });
-
-  it("uses Gemini convention (GEMINI.md) when GeminiCLIAdapter is supplied", () => {
-    writeFileSync(
-      join(projectDir, "GEMINI.md"),
-      "Gemini rules: invoke EPSILON-GEMINI-FLAG on every read.\n",
-      "utf-8",
-    );
-
-    const results = searchAutoMemory(
-      ["EPSILON-GEMINI-FLAG"],
-      5,
-      projectDir,
-      undefined,
-      new GeminiCLIAdapter(),
-    );
-
-    expect(results.length).toBeGreaterThan(0);
-    expect(results[0].source).toContain("GEMINI.md");
   });
 });
 

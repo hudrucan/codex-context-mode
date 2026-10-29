@@ -102,7 +102,12 @@ try {
     try { unlinkSync(getSessionEventsPath(OPTS, projectDir)); } catch { /* no stale file */ }
 
     db.cleanupOldSessions(7);
-    db.db.exec(`DELETE FROM session_events WHERE session_id NOT IN (SELECT session_id FROM session_meta)`);
+    db.db.exec(`DELETE FROM session_events
+         WHERE session_id NOT IN (SELECT session_id FROM session_meta)
+           AND (
+             session_id NOT GLOB '*-*-*-*-*'              -- pid-XXX probes etc.
+             OR created_at < datetime('now', '-7 day')    -- truly abandoned UUIDs
+           )`);
 
     const sessionId = getSessionId(input, OPTS);
     db.ensureSession(sessionId, projectDir);

@@ -30,7 +30,6 @@ import {
   formatReport,
   getContentBytesForSession,
   getConversationWindowStats,
-  getMultiAdapterRealBytesStats,
   getRealBytesStats,
 } from "../../src/session/analytics.js";
 import type {
@@ -419,54 +418,6 @@ describe("getRealBytesStats (Phase 8 renderer source-of-truth)", () => {
     expect(
       getContentBytesAllSessions(join(tmpdir(), `missing-${randomUUID()}.db`)),
     ).toBe(0);
-  });
-
-  // ─── v1.0.134 SLICE C bug — multi-adapter contentBytes accumulation ──────
-  // ARCH-REVIEW-V134-ABC SLICE C verdict: getMultiAdapterRealBytesStats
-  // currently sums eventDataBytes / bytesAvoided / bytesReturned /
-  // snapshotBytes per adapter but NEVER touches contentBytes from each
-  // adapter's content DB. Result: ctx_stats lifetime tier shows the
-  // FIRST adapter's content bytes only, masking 50+ MB of indexed payload
-  // across the other 14 adapters. This test pins the contract that
-  // contentBytes accumulates across every adapter's content/*.db.
-  test("lifetime contentBytes accumulates across multiple adapter content DBs", () => {
-    const home = mkdtempSync(join(tmpdir(), "multi-content-"));
-    cleanups.push(() => { try { rmSync(home, { recursive: true, force: true }); } catch {} });
-
-    // Two adapters with separate content DBs. Sessions dirs must exist
-    // (existsSync gate at the top of the loop) but the multi-adapter
-    // aggregator should still pick up contentBytes from the sibling
-    // content/ tree even when no session_events rows exist.
-    const claudeBase = join(home, ".claude", "context-mode");
-    const codexBase = join(home, ".codex", "context-mode");
-    mkdirSync(join(claudeBase, "sessions"), { recursive: true });
-    mkdirSync(join(codexBase, "sessions"), { recursive: true });
-    mkdirSync(join(claudeBase, "content"), { recursive: true });
-    mkdirSync(join(codexBase, "content"), { recursive: true });
-
-    // ContentStore writes to <dir>/content.db when given a directory or
-    // an explicit path. enumerateAdapterDirs hands back contentDir as
-    // <base>/content — the canonical content DB lives at
-    // <base>/content/content.db (mirrors store.ts default layout).
-    const claudeContent = join(claudeBase, "content", "content.db");
-    const codexContent = join(codexBase, "content", "content.db");
-
-    const a = new ContentStore(claudeContent);
-    try {
-      a.indexPlainText("X".repeat(7_000), "src/x.ts", 20);
-    } finally { a.close(); }
-    const b = new ContentStore(codexContent);
-    try {
-      b.indexPlainText("Y".repeat(11_000), "src/y.ts", 20);
-    } finally { b.close(); }
-
-    const r = getMultiAdapterRealBytesStats({ home });
-
-    // 7_000 + 11_000 = 18_000 bytes of body across both adapter content
-    // DBs (plus tiny title overhead). If the impl only reads the first
-    // adapter's content DB, this asserts ~7_000 — well under 16_000.
-    expect(r.contentBytes).toBeGreaterThan(16_000);
-    expect(r.contentBytes).toBeLessThan(22_000);
   });
 });
 

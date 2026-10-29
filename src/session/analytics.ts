@@ -15,7 +15,7 @@ import { homedir } from "node:os";
 import { join, sep } from "node:path";
 import { loadDatabase as loadDatabaseImpl } from "../db-base.js";
 import { ensureSessionEventsSchema } from "./db.js";
-import { resolveClaudeConfigDir } from "../util/claude-config.js";
+import { CodexAdapter } from "../adapters/codex/index.js";
 
 function semverNewer(a: string, b: string): boolean {
   const pa = a.split(".").map(Number);
@@ -86,7 +86,7 @@ export interface McpToolUsageRow {
  * changed (which is what made hours-of-work conversations show "1 call · 5 KB").
  */
 export interface ConversationStats {
-  /** session_id this aggregate covers (the current Claude Code conversation). */
+  /** session_id this aggregate covers (the current Codex conversation). */
   sessionId: string;
   /** Total event count for this session_id, summed across all DBs. */
   events: number;
@@ -587,74 +587,6 @@ export class AnalyticsEngine {
 }
 
 // ─────────────────────────────────────────────────────────
-// Adapter dir enumeration (B3a multi-adapter aggregation)
-// ─────────────────────────────────────────────────────────
-
-/**
- * Where one adapter stores its context-mode sidecars on disk. Mirrors the
- * map in `src/adapters/detect.ts:92-111` (`getSessionDirSegments`) so we
- * never go out of sync as a single source of truth.
- *
- * `sessionsDir` = `<home>/<segments>/context-mode/sessions`
- * `contentDir`  = `<home>/<segments>/context-mode/content`
- *
- * Why duplicated here: `getSessionDirSegments` returns segments relative to
- * `homedir()`; analytics needs the absolute joined paths for both `sessions`
- * and `content` siblings. Keeping a parallel hard-coded list avoids importing
- * detect.ts (which pulls in adapter loaders) into the stats path.
- */
-export interface AdapterDirEntry {
-  /** Adapter id matching `src/adapters/detect.ts` PlatformId. */
-  name: string;
-  /** Absolute path to `<home>/<segments>/context-mode/sessions`. */
-  sessionsDir: string;
-  /** Absolute path to `<home>/<segments>/context-mode/content`. */
-  contentDir: string;
-}
-
-/**
- * Enumerate every known adapter's sessions + content dirs under `home`.
- * Used by `getMultiAdapterLifetimeStats` and `getMultiAdapterRealBytesStats`
- * so a single call surfaces "your work everywhere on this machine across
- * all AI tools" (the marketing line).
- *
- * Returns ALL 17 adapters even when the dir doesn't exist on disk — the
- * scanner functions filter to existing dirs. That keeps the enumeration
- * pure / testable without filesystem dependencies.
- */
-export function enumerateAdapterDirs(opts?: { home?: string }): AdapterDirEntry[] {
-  const home = opts?.home ?? homedir();
-  // Mirrors `getSessionDirSegments` in src/adapters/detect.ts:92-111.
-  const map: ReadonlyArray<readonly [string, readonly string[]]> = [
-    ["claude-code",      [".claude"]],
-    ["gemini-cli",       [".gemini"]],
-    ["antigravity",      [".gemini"]],
-    ["antigravity-cli",  [".gemini"]],
-    ["openclaw",         [".openclaw"]],
-    ["codex",            [".codex"]],
-    ["cursor",           [".cursor"]],
-    ["vscode-copilot",   [".vscode"]],
-    ["copilot-cli",      [".copilot"]],
-    ["kiro",             [".kiro"]],
-    ["pi",               [".pi"]],
-    ["omp",              [".omp"]],
-    ["qwen-code",        [".qwen"]],
-    ["kilo",             [".config", "kilo"]],
-    ["opencode",         [".config", "opencode"]],
-    ["zed",              [".config", "zed"]],
-    ["jetbrains-copilot", [".config", "JetBrains"]],
-  ];
-  return map.map(([name, segments]) => {
-    const base = join(home, ...segments, "context-mode");
-    return {
-      name,
-      sessionsDir: join(base, "sessions"),
-      contentDir: join(base, "content"),
-    };
-  });
-}
-
-// ─────────────────────────────────────────────────────────
 // Lifetime stats (Bug #3 + #4)
 // ─────────────────────────────────────────────────────────
 
@@ -713,15 +645,9 @@ export function getLifetimeStats(opts?: {
   /** Override for tests — defaults to db-base loadDatabase(). */
   loadDatabase?: () => unknown;
 }): LifetimeStats {
-  // Issue #460 round-3: route through resolveClaudeConfigDir so lifetime
-  // stats aggregation tracks $CLAUDE_CONFIG_DIR instead of the literal
-  // ~/.claude tree. Otherwise users who relocate config see "no sessions"
-  // even though the SessionDB sidecars exist under the override.
-  const claudeRoot = resolveClaudeConfigDir();
-  const sessionsDir = opts?.sessionsDir
-    ?? join(claudeRoot, "context-mode", "sessions");
-  const memoryRoot = opts?.memoryRoot
-    ?? join(claudeRoot, "projects");
+  const codex = new CodexAdapter();
+  const sessionsDir = opts?.sessionsDir ?? codex.getSessionDir();
+  const memoryRoot = opts?.memoryRoot ?? codex.getMemoryDir();
 
   let totalEvents = 0;
   let totalSessions = 0;
@@ -824,7 +750,9 @@ export function getLifetimeStats(opts?: {
     } catch { /* unreadable */ }
 
     for (const proj of projectDirs) {
-      const memDir = join(memoryRoot, proj, "memory");
+      const projectRoot = join(memoryRoot, proj);
+      const nested = join(projectRoot, "memory");
+      const memDir = existsSync(nested) ? nested : projectRoot;
       if (!existsSync(memDir)) continue;
       let mdFiles: string[] = [];
       try {
@@ -857,7 +785,7 @@ export function getLifetimeStats(opts?: {
  * Aggregate every event for one `session_id` across all SessionDB files in
  * `sessionsDir` plus the compact-rescue snapshot bytes from `session_resume`.
  *
- * Why this exists: the Claude Code session_id can persist across days while
+ * Why this exists: the Codex session_id can persist across days while
  * the underlying DB file rotates (size cap), and a compact-rescue snapshot
  * carries hundreds of KB of context that would otherwise have been lost. The
  * old in-memory `tool_call_counter` saw none of this — it counted only `ctx_*`
@@ -873,7 +801,7 @@ export function getConversationStats(opts: {
   loadDatabase?: () => unknown;
 }): ConversationStats {
   const sessionsDir = opts.sessionsDir
-    ?? join(homedir(), ".claude", "context-mode", "sessions");
+    ?? new CodexAdapter().getSessionDir();
   const sessionId = opts.sessionId;
 
   const empty: ConversationStats = {
@@ -1173,7 +1101,7 @@ export function getRealBytesStats(opts: {
    * v1.0.148 follow-up (Bug E+F): when set, the function aggregates across
    * EVERY session whose `session_meta.project_dir` matches this value, not
    * just one session_id. Resolves the per-conversation under-attribution:
-   * one Claude Code conversation typically spans many session_ids (resume
+   * one Codex conversation typically spans many session_ids (resume
    * cycles, /compact rebirths, PID sub-process sessions spawned by
    * ctx_execute), so a single-session_id filter loses the sandbox-burst
    * bytes_avoided that all live under the conversation's cwd.
@@ -1207,7 +1135,7 @@ export function getRealBytesStats(opts: {
   };
 
   const sessionsDir = opts.sessionsDir
-    ?? join(homedir(), ".claude", "context-mode", "sessions");
+    ?? new CodexAdapter().getSessionDir();
   if (!existsSync(sessionsDir)) return empty;
 
   let dbFiles: string[] = [];
@@ -1449,293 +1377,6 @@ export function getConversationWindowStats(opts: {
   };
 }
 
-// ─────────────────────────────────────────────────────────
-// Multi-adapter aggregation (B3a — "your work everywhere")
-// ─────────────────────────────────────────────────────────
-
-/**
- * Real-usage filter thresholds. Decided in the B3a /diagnose conversation
- * to suppress fixture-noise dirs (test runs that touched ~/.X but never
- * carried real user work).
- *
- * An adapter is `isReal=true` iff ALL four hold:
- *   eventCount     >= 100
- *   distinctProjects >= 5
- *   lastActivity within 30 days
- *   avgEventBytes  >= 50
- *
- * Tuneable via `getMultiAdapterLifetimeStats({ filter })` for testing.
- */
-export interface RealUsageFilter {
-  minEvents?: number;
-  minProjects?: number;
-  recencyMs?: number;
-  minAvgBytes?: number;
-  /** Fixed "now" timestamp for deterministic testing. Defaults to Date.now(). */
-  nowMs?: number;
-}
-
-const DEFAULT_REAL_USAGE_FILTER: Required<Omit<RealUsageFilter, "nowMs">> = {
-  minEvents: 100,
-  minProjects: 5,
-  recencyMs: 30 * 86_400_000,
-  minAvgBytes: 50,
-};
-
-/** Per-adapter scan result returned by {@link scanOneAdapter}. */
-export interface AdapterScanResult {
-  /** Adapter id (matches `enumerateAdapterDirs().name`). */
-  name: string;
-  /** Total event rows across every `*.db` in this adapter's sessions dir. */
-  eventCount: number;
-  /** Total distinct session_meta rows across every db. */
-  sessionCount: number;
-  /** Sum of LENGTH(data) across every session_event row. */
-  dataBytes: number;
-  /** Sum of LENGTH(snapshot) across consumed compact-rescue snapshots. */
-  rescueBytes: number;
-  /** Reserved for future content/ scan (B3b). 0 today. */
-  contentBytes: number;
-  /** Distinct session_id count across all dbs (alias of sessionCount). */
-  uuidConvs: number;
-  /** Distinct project_dir values across all session_events. */
-  projectDirs: string[];
-  /** Earliest event ms epoch (Number.POSITIVE_INFINITY when no events). */
-  firstMs: number;
-  /** Latest event ms epoch (0 when no events). */
-  lastMs: number;
-  /** Real-usage flag — see {@link RealUsageFilter}. */
-  isReal: boolean;
-}
-
-/**
- * Scan one adapter's sessions dir. Always returns a result — never throws.
- * When the dir is missing, the result has zeroed counts and `isReal=false`.
- *
- * Mirrors the inner SessionDB-walk inside `getLifetimeStats`
- * (analytics.ts:677-752) so the new multi-adapter path stays in lock-step
- * with the per-DB queries the single-dir path already trusts.
- */
-function scanOneAdapter(
-  entry: AdapterDirEntry,
-  loadDb: () => unknown,
-  filter: Required<Omit<RealUsageFilter, "nowMs">> & { nowMs: number },
-): AdapterScanResult {
-  const result: AdapterScanResult = {
-    name: entry.name,
-    eventCount: 0,
-    sessionCount: 0,
-    dataBytes: 0,
-    rescueBytes: 0,
-    contentBytes: 0,
-    uuidConvs: 0,
-    projectDirs: [],
-    firstMs: Number.POSITIVE_INFINITY,
-    lastMs: 0,
-    isReal: false,
-  };
-  if (!existsSync(entry.sessionsDir)) return result;
-
-  let dbFiles: string[] = [];
-  try {
-    dbFiles = readdirSync(entry.sessionsDir).filter((f) => f.endsWith(".db"));
-  } catch { return result; }
-  if (dbFiles.length === 0) return result;
-
-  let DatabaseCtor: ReturnType<typeof loadDatabaseImpl> | null = null;
-  try {
-    DatabaseCtor = loadDb() as ReturnType<typeof loadDatabaseImpl>;
-  } catch { return result; }
-  if (!DatabaseCtor) return result;
-
-  const projectsSet = new Set<string>();
-  const sessionsSet = new Set<string>();
-
-  for (const file of dbFiles) {
-    const dbPath = join(entry.sessionsDir, file);
-    try {
-      const sdb = new DatabaseCtor(dbPath, { readonly: true });
-      try {
-        const ev = sdb.prepare(
-          "SELECT COUNT(*) AS cnt, COALESCE(SUM(LENGTH(data)), 0) AS bytes FROM session_events",
-        ).get() as { cnt: number; bytes: number } | undefined;
-        if (ev) {
-          result.eventCount += Number(ev.cnt ?? 0);
-          result.dataBytes  += Number(ev.bytes ?? 0);
-        }
-        try {
-          const ss = sdb.prepare(
-            "SELECT COUNT(*) AS cnt FROM session_meta",
-          ).get() as { cnt: number } | undefined;
-          result.sessionCount += Number(ss?.cnt ?? 0);
-        } catch { /* old schema */ }
-        try {
-          const snap = sdb.prepare(
-            "SELECT COALESCE(SUM(length(snapshot)), 0) AS bytes FROM session_resume WHERE consumed = 1",
-          ).get() as { bytes: number } | undefined;
-          if (snap?.bytes) result.rescueBytes += Number(snap.bytes);
-        } catch { /* old schema */ }
-        try {
-          const range = sdb.prepare(
-            "SELECT MIN(created_at) AS mn, MAX(created_at) AS mx FROM session_events",
-          ).get() as { mn: string | null; mx: string | null } | undefined;
-          if (range?.mn) {
-            const t = Date.parse(range.mn + (range.mn.endsWith("Z") ? "" : "Z"));
-            if (Number.isFinite(t) && t < result.firstMs) result.firstMs = t;
-          }
-          if (range?.mx) {
-            const t = Date.parse(range.mx + (range.mx.endsWith("Z") ? "" : "Z"));
-            if (Number.isFinite(t) && t > result.lastMs) result.lastMs = t;
-          }
-        } catch { /* old schema */ }
-        try {
-          const projRows = sdb.prepare(
-            "SELECT DISTINCT project_dir AS p FROM session_events WHERE project_dir != ''",
-          ).all() as Array<{ p: string }>;
-          for (const row of projRows) if (row.p) projectsSet.add(row.p);
-        } catch { /* old schema */ }
-        try {
-          const sidRows = sdb.prepare(
-            "SELECT DISTINCT session_id AS s FROM session_events",
-          ).all() as Array<{ s: string }>;
-          for (const row of sidRows) if (row.s) sessionsSet.add(row.s);
-        } catch { /* old schema */ }
-      } finally {
-        sdb.close();
-      }
-    } catch { /* missing tables / corrupt — skip */ }
-  }
-
-  result.projectDirs = Array.from(projectsSet);
-  result.uuidConvs = sessionsSet.size;
-
-  // Real-usage filter — see RealUsageFilter docstring.
-  const avgBytes = result.eventCount > 0 ? result.dataBytes / result.eventCount : 0;
-  const recentEnough =
-    result.lastMs > 0 && (filter.nowMs - result.lastMs) <= filter.recencyMs;
-  result.isReal =
-    result.eventCount  >= filter.minEvents &&
-    projectsSet.size   >= filter.minProjects &&
-    recentEnough &&
-    avgBytes           >= filter.minAvgBytes;
-
-  return result;
-}
-
-/** Aggregated multi-adapter lifetime stats. */
-export interface MultiAdapterLifetimeStats {
-  /** Sum of eventCount across every adapter that exists on disk. */
-  totalEvents: number;
-  /** Sum of sessionCount across every adapter. */
-  totalSessions: number;
-  /** Sum of dataBytes + rescueBytes across every adapter. */
-  totalBytes: number;
-  /** Per-adapter rows for adapters that have >= one .db file. */
-  perAdapter: AdapterScanResult[];
-}
-
-/**
- * Aggregate lifetime stats across every adapter dir under `home`.
- * The marketing line — "your work everywhere on this machine across all
- * AI tools" — depends on this. Existing `getLifetimeStats` (single dir)
- * is untouched; this is purely additive.
- */
-export function getMultiAdapterLifetimeStats(opts?: {
-  home?: string;
-  loadDatabase?: () => unknown;
-  filter?: RealUsageFilter;
-}): MultiAdapterLifetimeStats {
-  const dirs = enumerateAdapterDirs({ home: opts?.home });
-  const loadDb = opts?.loadDatabase ?? loadDatabaseImpl;
-  const filter = {
-    ...DEFAULT_REAL_USAGE_FILTER,
-    ...(opts?.filter ?? {}),
-    nowMs: opts?.filter?.nowMs ?? Date.now(),
-  };
-
-  const perAdapter: AdapterScanResult[] = [];
-  let totalEvents = 0;
-  let totalSessions = 0;
-  let totalBytes = 0;
-
-  for (const entry of dirs) {
-    if (!existsSync(entry.sessionsDir)) continue; // only surface adapters with a sessions dir
-    const r = scanOneAdapter(entry, loadDb, filter);
-    perAdapter.push(r);
-    totalEvents   += r.eventCount;
-    totalSessions += r.sessionCount;
-    totalBytes    += r.dataBytes + r.rescueBytes;
-  }
-
-  return { totalEvents, totalSessions, totalBytes, perAdapter };
-}
-
-/** Aggregated multi-adapter real-bytes stats. */
-export interface MultiAdapterRealBytesStats extends RealBytesStats {
-  /** Per-adapter row in the same shape as {@link RealBytesStats}, keyed by name. */
-  perAdapter: Array<RealBytesStats & { name: string }>;
-}
-
-/**
- * Aggregate real-bytes stats across every adapter dir under `home`.
- * Mirrors `getRealBytesStats` (single dir, analytics.ts:887-989) but
- * iterates {@link enumerateAdapterDirs}. Optional `sessionId` /
- * `worktreeHash` filters apply uniformly to every dir.
- */
-export function getMultiAdapterRealBytesStats(opts?: {
-  home?: string;
-  sessionId?: string;
-  worktreeHash?: string;
-  loadDatabase?: () => unknown;
-}): MultiAdapterRealBytesStats {
-  const dirs = enumerateAdapterDirs({ home: opts?.home });
-
-  const sum: RealBytesStats = {
-    eventDataBytes: 0,
-    bytesAvoided: 0,
-    bytesReturned: 0,
-    snapshotBytes: 0,
-    contentBytes: 0,
-    totalSavedTokens: 0,
-  };
-  const perAdapter: MultiAdapterRealBytesStats["perAdapter"] = [];
-
-  for (const entry of dirs) {
-    if (!existsSync(entry.sessionsDir)) continue;
-    const one = getRealBytesStats({
-      sessionsDir: entry.sessionsDir,
-      sessionId: opts?.sessionId,
-      worktreeHash: opts?.worktreeHash,
-      loadDatabase: opts?.loadDatabase,
-    });
-    // ARCH-REVIEW-V134-ABC SLICE C: aggregate this adapter's content DB
-    // bytes into the lifetime sum. `getRealBytesStats` operates on
-    // session events only and never touches the sibling content/ tree —
-    // without this step the lifetime tier in ctx_stats reports 0 for
-    // every adapter except whichever one happens to share the
-    // sessionsDir of the caller. Lifetime tier ignores sessionId so
-    // the all-sessions aggregator is the right helper here.
-    if (!opts?.sessionId) {
-      const contentDbPath = join(entry.contentDir, "content.db");
-      const adapterContentBytes = getContentBytesAllSessions(contentDbPath, {
-        loadDatabase: opts?.loadDatabase as (() => unknown) | undefined,
-      });
-      one.contentBytes += adapterContentBytes;
-      sum.contentBytes += adapterContentBytes;
-    }
-    perAdapter.push({ name: entry.name, ...one });
-    sum.eventDataBytes += one.eventDataBytes;
-    sum.bytesAvoided   += one.bytesAvoided;
-    sum.bytesReturned  += one.bytesReturned;
-    sum.snapshotBytes  += one.snapshotBytes;
-  }
-  sum.totalSavedTokens = Math.floor(
-    (sum.eventDataBytes + sum.bytesAvoided + sum.snapshotBytes) / 4,
-  );
-
-  return { ...sum, perAdapter };
-}
-
 /**
  * Marketing-grade labels for auto-memory file prefixes. The renderer sees raw
  * filename prefixes (`project_codex_hooks.md` → `project`) — without this map
@@ -1749,37 +1390,6 @@ export const autoMemoryLabels: Record<string, string> = {
   memory: "Long-term context",
   other: "Other notes",
 };
-
-/**
- * Marketing-grade labels for adapter ids surfaced by
- * {@link enumerateAdapterDirs} / {@link getMultiAdapterLifetimeStats}.
- * The renderer never shows raw IDs — UX uses the names users see in
- * each tool's own surface area.
- */
-export const adapterLabels: Record<string, string> = {
-  "claude-code":       "Claude Code",
-  "gemini-cli":        "Gemini CLI",
-  "antigravity":       "Antigravity",
-  "antigravity-cli":   "Antigravity CLI",
-  "openclaw":          "Openclaw",
-  "codex":             "Codex CLI",
-  "cursor":            "Cursor",
-  "vscode-copilot":    "VS Code Copilot",
-  "copilot-cli":       "GitHub Copilot CLI",
-  "kiro":              "Kiro",
-  "pi":                "Pi",
-  "omp":               "OMP",
-  "qwen-code":         "Qwen Code",
-  "kilo":              "Kilo",
-  "opencode":          "OpenCode",
-  "zed":               "Zed",
-  "jetbrains-copilot": "JetBrains",
-};
-
-/** Look up an adapter's marketing label. Falls back to the raw id. */
-function adapterLabel(name: string): string {
-  return adapterLabels[name] ?? name;
-}
 
 // ─────────────────────────────────────────────────────────
 // formatReport — renders FullReport as sales-grade savings dashboard
@@ -1999,28 +1609,15 @@ export function renderCostExample(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _haikuUsd  = ((lifetimeTokens * 1.0)  / 1_000_000).toFixed(2);
 
-  const usingDynamicPrice =
-    process.env.PI_CONTEXT_MODE_PRICE_OUTPUT_PER_TOKEN !== undefined;
-  const modelId = process.env.PI_CONTEXT_MODE_MODEL_ID;
 
   // Mert: "daha marketing ve business value e vermeli, math hesaplamalari ile
   // kalabalik yapma" — collapse the old 4-block render into ONE headline
   // number, ONE relatable comparison, ONE team-scale callout.
   const out: string[] = [];
 
-  if (usingDynamicPrice && modelId) {
-    out.push(
-      `  $${usdStr(lifetimeUsd)} of ${modelId} tokens your team didn't burn.`,
-    );
-  } else if (usingDynamicPrice) {
-    out.push(
-      `  $${usdStr(lifetimeUsd)} of tokens your team didn't burn.`,
-    );
-  } else {
-    out.push(
+  out.push(
       `  $${usdStr(lifetimeUsd)} of Opus 4.7 tokens your team didn't burn.`,
     );
-  }
 
   out.push(
     `  context-mode kept ${kb(lifetimeBytes)} out of context — that's ${cursorMonths} months of Cursor Pro paid for itself.`,
@@ -2032,7 +1629,7 @@ export function renderCostExample(
     );
   }
 
-  if (!usingDynamicPrice) {
+  {
     out.push("");
     out.push(
       `  (Opus rates shown for context. On cheaper models the dollar number drops; the savings ratio holds.)`,
@@ -2064,7 +1661,6 @@ export function renderCostExample(
 function renderNarrative5Section(args: {
   conversation: ConversationStats;
   lifetime?: LifetimeStats;
-  multiAdapter?: MultiAdapterLifetimeStats;
   realBytes?: { lifetime?: RealBytesStats; conversation?: RealBytesStats };
   cwd: string;
   locale: string;
@@ -2073,7 +1669,7 @@ function renderNarrative5Section(args: {
   version?: string;
   latestVersion?: string | null;
 }): string[] {
-  const { conversation, lifetime, multiAdapter, realBytes, cwd, locale, tz, now, version, latestVersion } = args;
+  const { conversation, lifetime, realBytes, cwd, locale, tz, now, version, latestVersion } = args;
   const out: string[] = [];
 
   // ── Token math (same monotonic-growth invariant as the legacy branch).
@@ -2102,9 +1698,7 @@ function renderNarrative5Section(args: {
   // Bytes from realBytes when present, else derive from tokens (×4 — same
   // ratio Phase 8 uses everywhere). All-work bytes drives the opener tally
   // + the section-3 receipt + section-4 cost example.
-  const lifetimeBytes = (multiAdapter?.totalBytes && multiAdapter.totalBytes > 0)
-    ? multiAdapter.totalBytes
-    : lifetimeTokensWithout * 4;
+  const lifetimeBytes = lifetimeTokensWithout * 4;
   const convBytes = realBytes?.conversation
     ? (realBytes.conversation.eventDataBytes + realBytes.conversation.bytesAvoided + realBytes.conversation.snapshotBytes)
     : conversationTokens * 4;
@@ -2115,21 +1709,12 @@ function renderNarrative5Section(args: {
     : `${Math.max(1, Math.round(conversation.daysAlive * 24))} hr alive · still going`;
 
   // ── Lifetime span (opener + receipt) — across every adapter / DB on disk.
-  const sinceMs = lifetime?.firstEventMs ?? multiAdapter?.perAdapter?.[0]?.firstMs ?? 0;
+  const sinceMs = lifetime?.firstEventMs ?? 0;
   const lifetimeDays = sinceMs > 0
     ? Math.max(1, Math.round((now - sinceMs) / 86_400_000))
     : 0;
-  const totalConversations = multiAdapter?.totalSessions ?? lifetime?.totalSessions ?? 1;
-  const realAdapterCount = multiAdapter?.perAdapter.filter((a) => a.isReal).length ?? 0;
-  let where: string;
-  if (multiAdapter && realAdapterCount >= 2) {
-    where = `across ${realAdapterCount} AI tools`;
-  } else if (multiAdapter && realAdapterCount === 1) {
-    const onlyReal = multiAdapter.perAdapter.find((a) => a.isReal);
-    where = `in ${onlyReal ? adapterLabel(onlyReal.name) : "Claude Code"}`;
-  } else {
-    where = "in Claude Code";
-  }
+  const totalConversations = lifetime?.totalSessions ?? 1;
+  const where = "in Codex";
 
   // ── Opener.
   if (lifetimeDays > 0) {
@@ -2263,7 +1848,7 @@ function renderNarrative5Section(args: {
         .format(new Date(sinceMs))
     : "";
   const distinctProj = lifetime?.distinctProjects ?? 0;
-  const allCaps = lifetime?.totalEvents ?? multiAdapter?.totalEvents ?? 0;
+  const allCaps = lifetime?.totalEvents ?? 0;
   out.push(
     `  This chat: ${kb(convBytes)} kept out · ${conversation.events.toLocaleString(locale)} captures${convStartedYMD ? ` · started ${convStartedYMD}` : ""}.`,
   );
@@ -2475,37 +2060,9 @@ function fmtNum(n: number): string {
   return String(n);
 }
 
-// ─────────────────────────────────────────────────────────
-// Pricing (Bug #6) — Anthropic Opus input rate
-// ─────────────────────────────────────────────────────────
+/** Default token-price estimate; usage-event pricing remains model-specific. */
+export function pricePerToken(): number { return 5 / 1_000_000; }
 
-// ── Pricing (Bug #6) — per-token USD rate ─────────────────
-// Reads PI_CONTEXT_MODE_PRICE_OUTPUT_PER_TOKEN when set by a Pi host;
-// falls back to the Opus 4.7/4.8 input rate ($5/1M) for all other adapters.
-// Verified against platform.claude.com/docs/en/about-claude/pricing 2026-06.
-//
-// IMPORTANT: this is a FUNCTION, not a const. Pi sets the env var
-// AFTER the MCP server has been imported (the bridge spawns the server
-// child, then the child reads its own env on every render). A
-// module-load-time const would freeze to the fallback because
-// process.env.PI_CONTEXT_MODE_PRICE_OUTPUT_PER_TOKEN is unset at
-// import time. Resolving on every call keeps the dynamic-pricing
-// contract honest — the env var works without an MCP restart.
-// (Reverted module-load const semantics, PR #741 follow-up.)
-
-/**
- * Per-token USD rate — resolves on every call.
- * Dynamic when PI_CONTEXT_MODE_PRICE_OUTPUT_PER_TOKEN is set, Opus 4.7/4.8 input
- * ($5 per 1M tokens) otherwise.
- */
-export function pricePerToken(): number {
-  const env = process.env.PI_CONTEXT_MODE_PRICE_OUTPUT_PER_TOKEN;
-  if (env !== undefined && env !== "") {
-    const parsed = Number(env);
-    if (Number.isFinite(parsed) && parsed > 0) return parsed;
-  }
-  return 5 / 1_000_000; // Opus 4.7/4.8 input fallback
-}
 
 /**
  * Back-compat alias for the original Opus-rate const (PR #401 architect
@@ -2559,7 +2116,6 @@ function renderProjectMemory(
      * lifetime.categoryCounts because the multi-adapter scan today does
      * not bucket categories.
      */
-    multiAdapter?: MultiAdapterLifetimeStats;
   },
 ): string[] {
   const sessionTokensSaved = opts?.sessionTokensSaved ?? 0;
@@ -2567,8 +2123,7 @@ function renderProjectMemory(
   if (
     pm.total_events === 0 &&
     (opts?.lifetime?.totalEvents ?? 0) === 0 &&
-    sessionTokensSaved === 0 &&
-    (opts?.multiAdapter?.totalEvents ?? 0) === 0
+    sessionTokensSaved === 0
   ) {
     return [];
   }
@@ -2579,23 +2134,11 @@ function renderProjectMemory(
   const topN = opts?.topN ?? Number.POSITIVE_INFINITY;
   const out: string[] = [];
   out.push("");
-  // Header switches based on whether we have rich lifetime data from the new
-  // pipeline. With it: forward-leaning "All your work" framing. Without it:
-  // legacy "Persistent memory" line for back-compat with older fixtures + tests.
-  // Slice 3.6: promote to "All your work everywhere" when multi-adapter
-  // aggregation is supplied so the receipt scope matches the rendered totals.
-  const ma = opts?.multiAdapter;
-  const realAdapters = ma?.perAdapter.filter((a) => a.isReal).length ?? 0;
-  const lifeEvents = ma?.totalEvents
-    ?? opts?.lifetime?.totalEvents
-    ?? pm.total_events;
-  const lifeSessions = ma?.totalSessions
-    ?? opts?.lifetime?.totalSessions
-    ?? pm.session_count;
+  const lifeEvents = opts?.lifetime?.totalEvents ?? pm.total_events;
+  const lifeSessions = opts?.lifetime?.totalSessions ?? pm.session_count;
   const distinctProj = opts?.lifetime?.distinctProjects;
   if (lifeEvents > 0 && distinctProj && distinctProj > 0) {
-    const everywhere = realAdapters >= 2 ? " everywhere" : "";
-    out.push(`  All your work${everywhere}  ·  ${fmtNum(lifeEvents)} events captured across ${distinctProj} project${distinctProj === 1 ? "" : "s"}  ·  ${fmtNum(lifeSessions)} conversations`);
+    out.push(`  All your work  ·  ${fmtNum(lifeEvents)} events captured across ${distinctProj} project${distinctProj === 1 ? "" : "s"}  ·  ${fmtNum(lifeSessions)} conversations`);
   } else {
     out.push("Persistent memory  ✓ preserved across compact, restart & upgrade");
     // Current session counts as 1 when no prior session has been recorded yet.
@@ -2645,7 +2188,7 @@ function renderProjectMemory(
 }
 
 /**
- * Render the auto-memory section (Bug #4) — files Claude Code captured
+ * Render the auto-memory section (Bug #4) — files Codex captured
  * under ~/.claude/projects/<project>/memory/ across the user's machine.
  */
 function renderAutoMemory(lifetime: LifetimeStats | undefined): string[] {
@@ -2751,70 +2294,6 @@ function renderConversation(c: ConversationStats, conversationUsd: string, contr
 }
 
 /**
- * B3b Slice 3.2/3.3 — render the "Where it came from" sub-block from a
- * `MultiAdapterLifetimeStats` (analytics.ts:1231-1240). Two layers:
- *
- *  1. Real adapters (`isReal=true`) become a table row each:
- *       Tool          Captures   Indexed     Total kept out
- *       Claude Code     17.4K    276.7 MB        291.1 MB
- *       JetBrains            —     8.6 MB          8.6 MB
- *
- *  2. Filtered adapters (`isReal=false` but with at least one .db on disk)
- *     become a single "Skipped (N): name1, name2, ..." disclosure line so
- *     the user sees that fixtures/probes were intentionally hidden.
- *
- * Returns [] when `multiAdapter` is undefined OR when there are no real
- * adapters AND nothing skipped — keeping the renderer additive (Slice 3.5).
- */
-function renderMultiAdapter(multiAdapter: MultiAdapterLifetimeStats | undefined): string[] {
-  if (!multiAdapter) return [];
-  const real: typeof multiAdapter.perAdapter = [];
-  const skipped: typeof multiAdapter.perAdapter = [];
-  for (const a of multiAdapter.perAdapter) (a.isReal ? real : skipped).push(a);
-  if (real.length === 0 && skipped.length === 0) return [];
-
-  const out: string[] = [];
-  if (real.length > 0) {
-    out.push("");
-    out.push("Where it came from (tools you actually used — fixtures + probes filtered):");
-    out.push("");
-    // Column widths chosen so the demo render stays visually aligned even
-    // for adapters with very long marketing names. Right-aligned numerics.
-    const NAME_W = 16;
-    const CAP_W  = 10;
-    const IDX_W  = 10;
-    const TOT_W  = 16;
-    out.push(
-      `  ${"Tool".padEnd(NAME_W)}${"Captures".padStart(CAP_W)}${"Indexed".padStart(IDX_W)}${"Total kept out".padStart(TOT_W)}`,
-    );
-    // Sort by total kept out desc — biggest contributor first.
-    const sorted = [...real].sort(
-      (a, b) => (b.dataBytes + b.rescueBytes) - (a.dataBytes + a.rescueBytes),
-    );
-    for (const a of sorted) {
-      const total = a.dataBytes + a.rescueBytes;
-      // Em-dash for zero captures so the column reads "—" not "0".
-      const captures = a.eventCount > 0 ? fmtNum(a.eventCount) : "—";
-      const indexed  = kb(a.dataBytes);
-      const totalStr = kb(total);
-      out.push(
-        `  ${adapterLabel(a.name).padEnd(NAME_W)}${captures.padStart(CAP_W)}${indexed.padStart(IDX_W)}${totalStr.padStart(TOT_W)}`,
-      );
-    }
-  }
-
-  if (skipped.length > 0) {
-    if (real.length > 0) out.push("");
-    const names = skipped.map((a) => adapterLabel(a.name)).join(", ");
-    out.push(`  Skipped (${skipped.length}): ${names}`);
-    out.push("  These adapters have DBs on disk but only test fixtures, dev skeletons,");
-    out.push("  or detection probes — no real chat activity.");
-  }
-
-  return out;
-}
-
-/**
  * Render a FullReport as a visual savings dashboard designed for screenshotting.
  *
  * Design principles:
@@ -2859,7 +2338,6 @@ export function formatReport(
      * everywhere". Backward compat: omitting this opt preserves the legacy
      * single-adapter renderer output unchanged.
      */
-    multiAdapter?: MultiAdapterLifetimeStats;
     /**
      * Point-in-time snapshot of the persistent content store. Optional —
      * callers that don't have store access can omit it and the renderer
@@ -2883,41 +2361,6 @@ export function formatReport(
   const mcpUsage = opts?.mcpUsage;
   const conversation = opts?.conversation;
   const realBytes = opts?.realBytes;
-  const multiAdapter = opts?.multiAdapter;
-  // Real-adapter count drives the "across N AI tools" headline copy
-  // (Slice 3.4) — we only call something a "tool you used" once it
-  // passes the isReal filter inside getMultiAdapterLifetimeStats.
-  const realAdapterCount = multiAdapter?.perAdapter.filter((a) => a.isReal).length ?? 0;
-
-  // ── B3b Slice 3.4: opening tagline — runs in EVERY render path so the
-  // multi-adapter headline appears regardless of which formatReport branch
-  // executes (active session / fresh / per-conversation). Falls back to
-  // "in Claude Code" when only one adapter qualifies as real, matching the
-  // Mert-approved demo wording. Suppressed entirely without multiAdapter
-  // so legacy single-adapter renders stay byte-identical (Slice 3.5).
-  if (multiAdapter && realAdapterCount > 0) {
-    const totalConvs = multiAdapter.totalSessions || lifetime?.totalSessions || 0;
-    const sinceMs = lifetime?.firstEventMs ?? 0;
-    const days = sinceMs > 0
-      ? Math.max(1, Math.round((Date.now() - sinceMs) / 86_400_000))
-      : 0;
-    const daySegment = days > 0 ? `Across ${days} day${days === 1 ? "" : "s"} ` : "";
-    const convStr = totalConvs > 0
-      ? `you ran ${fmtNum(totalConvs)} conversation${totalConvs === 1 ? "" : "s"} `
-      : "you ran ";
-    let where: string;
-    if (realAdapterCount >= 2) {
-      where = `across ${realAdapterCount} AI tools`;
-    } else {
-      // Single real adapter — use its marketing label (defaults to Claude Code
-      // if for some reason the only real adapter has no entry in adapterLabels).
-      const onlyReal = multiAdapter.perAdapter.find((a) => a.isReal);
-      where = `in ${onlyReal ? adapterLabel(onlyReal.name) : "Claude Code"}`;
-    }
-    lines.push(`${daySegment}${convStr}${where}.`);
-    lines.push("");
-  }
-
   // ── 5-section narrative ("kitap gibi") layout — Mert-approved
   //    screenshot format produced when the MCP handler has wired
   //    conversation + lifetime + multi-adapter through. Replaces the
@@ -2940,7 +2383,7 @@ export function formatReport(
     const locale = opts?.locale ?? detected.locale;
     const tz     = opts?.tz     ?? detected.tz;
     lines.push(...renderNarrative5Section({
-      conversation, lifetime, multiAdapter, realBytes,
+      conversation, lifetime, realBytes,
       cwd, locale, tz, now, version, latestVersion,
     }));
     return lines.join("\n");
@@ -2970,8 +2413,7 @@ export function formatReport(
     }
 
     // Project memory + auto-memory + bottom line
-    lines.push(...renderProjectMemory(report.projectMemory, { lifetime, multiAdapter, sessionTokensSaved: 0 }));
-    lines.push(...renderMultiAdapter(multiAdapter));
+    lines.push(...renderProjectMemory(report.projectMemory, { lifetime, sessionTokensSaved: 0 }));
     lines.push(...renderAutoMemory(lifetime));
     lines.push(...renderBottomLine(0, lifetime));
 
@@ -3060,14 +2502,13 @@ export function formatReport(
   }
 
   // ── Project memory — persistent across sessions (Bug #3 + #5) ──
-  lines.push(...renderProjectMemory(report.projectMemory, { lifetime, multiAdapter, sessionTokensSaved: tokensSaved }));
+  lines.push(...renderProjectMemory(report.projectMemory, { lifetime, sessionTokensSaved: tokensSaved }));
 
   // ── B3b Slice 3.2/3.3 — "Where it came from" per-adapter sub-block.
   // Sits under the lifetime memory block so the receipt-to-source flow is
   // visually contiguous (lifetime totals → which tools produced them).
-  lines.push(...renderMultiAdapter(multiAdapter));
 
-  // ── Auto-memory — Claude Code's preference learnings (Bug #4) ──
+  // ── Auto-memory — Codex's preference learnings (Bug #4) ──
   lines.push(...renderAutoMemory(lifetime));
 
   // ── Bottom line — business value framing (Bug #8) ──

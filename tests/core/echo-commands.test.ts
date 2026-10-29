@@ -132,7 +132,7 @@ interface RpcResponse {
 function spawnServer(extraEnv: Record<string, string> = {}): ChildProcess {
   return spawn("node", [mcpEntry], {
     stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, CONTEXT_MODE_DISABLE_VERSION_CHECK: "1", ...extraEnv },
+    env: { ...process.env, CONTEXT_MODE_PROJECT_DIR: process.cwd(), CONTEXT_MODE_DISABLE_VERSION_CHECK: "1", ...extraEnv },
   });
 }
 
@@ -196,7 +196,7 @@ describe("issue #717 — ctx_execute echoes the language + code it ran", () => {
   });
 
   test("success path: response carries fenced ```javascript block with the exact code, before stdout", async () => {
-    const proc = spawnServer({ CLAUDE_PROJECT_DIR: projectDir });
+    const proc = spawnServer({ CONTEXT_MODE_PROJECT_DIR: projectDir });
     try {
       await initServer(proc);
       const marker = `EXEC-MARKER-${Math.random().toString(36).slice(2)}`;
@@ -237,7 +237,7 @@ describe("issue #736 — ctx_batch_execute summary includes a Commands inventory
   });
 
   test("response carries `## Commands` listing each `- <label>: \\`<command>\\`` before `## Indexed Sections`", async () => {
-    const proc = spawnServer({ CLAUDE_PROJECT_DIR: projectDir });
+    const proc = spawnServer({ CONTEXT_MODE_PROJECT_DIR: projectDir });
     try {
       await initServer(proc);
       const resp = await awaitRpc(proc, 102, {
@@ -290,7 +290,7 @@ describe("issue #717 — ctx_execute_file echoes the path + code it ran", () => 
   });
 
   test("success path: response carries `path=<file>` + fenced code block before stdout", async () => {
-    const proc = spawnServer({ CLAUDE_PROJECT_DIR: projectDir });
+    const proc = spawnServer({ CONTEXT_MODE_PROJECT_DIR: projectDir });
     try {
       await initServer(proc);
       const marker = `FILE-MARKER-${Math.random().toString(36).slice(2)}`;

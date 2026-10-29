@@ -1,22 +1,4 @@
-/**
- * Shared session helpers for context-mode hooks.
- * Used by posttooluse.mjs, precompact.mjs, sessionstart.mjs,
- * and platform-specific hooks (Gemini CLI, VS Code Copilot).
- *
- * All functions accept an optional `opts` parameter for platform-specific
- * configuration. Defaults to Claude Code settings for backward compatibility.
- *
- * ─── PATH / HASH HELPERS ARE BOUND, NOT REIMPLEMENTED ──────────────────
- * Hash + worktree-suffix + legacy migration logic lives in TypeScript at
- * `src/session/db.ts` and is bundled to `hooks/session-db.bundle.mjs` by
- * the existing esbuild step in `npm run bundle`. This file imports those
- * exports via the bundle so the JS hooks and the TS server cannot drift
- * again — the same drift that produced rounds 5 and 6 of case-fold fixes.
- *
- * Bundle-first / build-fallback resolution mirrors the pattern in
- * `session-loaders.mjs` for marketplace installs that ship `build/`
- * artifacts instead of pre-built bundles.
- */
+/** Codex hook helpers; DB/hash logic is bound to the shared session bundle. */
 
 import { join, dirname } from "node:path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -123,63 +105,6 @@ function getWorktreeSuffix(projectDir = process.cwd()) {
   return suffix;
 }
 
-// ─────────────────────────────────────────────────────────
-// Platform options (hook-only — the server doesn't fork hooks).
-// ─────────────────────────────────────────────────────────
-
-/** Claude Code platform options (default). */
-const CLAUDE_OPTS = {
-  configDir: ".claude",
-  configDirEnv: "CLAUDE_CONFIG_DIR",
-  projectDirEnv: "CLAUDE_PROJECT_DIR",
-  sessionIdEnv: "CLAUDE_SESSION_ID",
-};
-
-/** Gemini CLI platform options. */
-export const GEMINI_OPTS = {
-  configDir: ".gemini",
-  configDirEnv: "GEMINI_CLI_HOME",
-  projectDirEnv: "GEMINI_PROJECT_DIR",
-  sessionIdEnv: undefined,
-};
-
-/**
- * Antigravity CLI (`agy`) platform options. Shares the Gemini-family session
- * root (~/.gemini/context-mode/sessions). agy supplies the conversation id and
- * workspace path inside the hook payload (mapped to session_id/cwd before these
- * opts are consulted), so no env-var fallbacks are needed.
- */
-export const ANTIGRAVITY_CLI_OPTS = {
-  configDir: ".gemini",
-  configDirEnv: undefined,
-  projectDirEnv: undefined,
-  sessionIdEnv: undefined,
-};
-
-/** VS Code Copilot platform options. */
-export const VSCODE_OPTS = {
-  configDir: ".vscode",
-  configDirEnv: undefined,
-  projectDirEnv: "VSCODE_CWD",
-  sessionIdEnv: undefined,
-};
-
-/** GitHub Copilot CLI platform options. */
-export const COPILOT_OPTS = {
-  configDir: ".copilot",
-  configDirEnv: "COPILOT_HOME",
-  projectDirEnv: undefined,
-  sessionIdEnv: undefined,
-};
-
-/** Cursor platform options. */
-export const CURSOR_OPTS = {
-  configDir: ".cursor",
-  configDirEnv: undefined,
-  projectDirEnv: "CURSOR_CWD",
-  sessionIdEnv: "CURSOR_SESSION_ID",
-};
-
 /** Codex CLI platform options. */
 export const CODEX_OPTS = {
   configDir: ".codex",
@@ -188,48 +113,13 @@ export const CODEX_OPTS = {
   sessionIdEnv: undefined,    // Uses session_id from hook stdin or ppid fallback
 };
 
-/** Kiro CLI platform options. */
-export const KIRO_OPTS = {
-  configDir: ".kiro",
-  configDirEnv: undefined,
-  projectDirEnv: undefined,   // Kiro CLI provides cwd in hook stdin, no env var
-  sessionIdEnv: undefined,    // No session ID env var — uses ppid fallback
-};
-
-/** Kimi Code CLI platform options.
- *
- * `KIMI_CODE_HOME` is documented at
- *   refs/platforms/kimi-code/docs/zh/configuration/env-vars.md:11-21
- *   refs/platforms/kimi-code/docs/en/configuration/env-vars.md:9-21
- * and is read by MoonshotAI's own first-party plugins
- *   refs/platforms/kimi-code/plugins/official/kimi-datasource/bin/
- *     kimi-datasource.mjs:207-210
- * so context-mode must honour it too — otherwise relocated Kimi installs
- * keep the user's data root at `$KIMI_CODE_HOME` while context-mode keeps
- * its session DB stranded at `~/.kimi-code/context-mode/sessions/`.
- */
-export const KIMI_OPTS = {
-  configDir: ".kimi-code",
-  configDirEnv: "KIMI_CODE_HOME",
-  projectDirEnv: undefined,   // Kimi Code passes cwd in hook stdin, no env var
-  sessionIdEnv: undefined,    // Uses session_id from hook stdin or ppid fallback
-};
-
-/** JetBrains Copilot platform options. */
-export const JETBRAINS_OPTS = {
-  configDir: ".config/JetBrains",
-  configDirEnv: undefined,
-  projectDirEnv: "IDEA_INITIAL_DIRECTORY",
-  sessionIdEnv: undefined,
-};
-
 /**
  * Resolve the platform config directory, respecting env var overrides.
  * Platforms like Claude Code (CLAUDE_CONFIG_DIR), Gemini CLI (GEMINI_CLI_HOME),
  * and Codex CLI (CODEX_HOME) allow users to customize the config location.
  * Falls back to ~/<configDir> when no env var is set.
  */
-export function resolveConfigDir(opts = CLAUDE_OPTS) {
+export function resolveConfigDir(opts = CODEX_OPTS) {
   if (opts.configDirEnv) {
     const envVal = process.env[opts.configDirEnv];
     if (envVal) {
@@ -339,7 +229,7 @@ export function readStdin() {
  * Get the project directory for the current platform.
  * Uses the platform-specific env var, falls back to cwd.
  */
-export function getProjectDir(opts = CLAUDE_OPTS) {
+export function getProjectDir(opts = CODEX_OPTS) {
   return process.env[opts.projectDirEnv] || process.cwd();
 }
 
@@ -347,7 +237,7 @@ export function getProjectDir(opts = CLAUDE_OPTS) {
  * Get the project directory from hook input when available.
  * Falls back to the platform env var and finally process.cwd().
  */
-export function getInputProjectDir(input, opts = CLAUDE_OPTS) {
+export function getInputProjectDir(input, opts = CODEX_OPTS) {
   if (typeof input?.cwd === "string" && input.cwd.length > 0) {
     return input.cwd;
   }
@@ -361,7 +251,7 @@ export function getInputProjectDir(input, opts = CLAUDE_OPTS) {
  * Derive session ID from hook input.
  * Priority: transcript_path UUID > sessionId (camelCase) > session_id > env var > ppid fallback.
  */
-export function getSessionId(input, opts = CLAUDE_OPTS) {
+export function getSessionId(input, opts = CODEX_OPTS) {
   if (input.transcript_path) {
     const match = input.transcript_path.match(/([a-f0-9-]{36})\.jsonl$/);
     if (match) return match[1];
@@ -405,7 +295,7 @@ function _resolveProjectFile(opts, projectDirOverride, ext) {
  * Creates the directory if it doesn't exist.
  * Path: ~/<configDir>/context-mode/sessions/<canonicalHash><suffix>.db
  */
-export function getSessionDBPath(opts = CLAUDE_OPTS, projectDirOverride) {
+export function getSessionDBPath(opts = CODEX_OPTS, projectDirOverride) {
   return _resolveProjectFile(opts, projectDirOverride, ".db");
 }
 
@@ -414,7 +304,7 @@ export function getSessionDBPath(opts = CLAUDE_OPTS, projectDirOverride) {
  * Used by sessionstart hook (write) and MCP server (read + auto-index).
  * Path: ~/<configDir>/context-mode/sessions/<canonicalHash><suffix>-events.md
  */
-export function getSessionEventsPath(opts = CLAUDE_OPTS, projectDirOverride) {
+export function getSessionEventsPath(opts = CODEX_OPTS, projectDirOverride) {
   return _resolveProjectFile(opts, projectDirOverride, "-events.md");
 }
 
@@ -423,6 +313,6 @@ export function getSessionEventsPath(opts = CLAUDE_OPTS, projectDirOverride) {
  * Used to detect true fresh starts vs --continue (which fires startup+resume).
  * Path: ~/<configDir>/context-mode/sessions/<canonicalHash><suffix>.cleanup
  */
-export function getCleanupFlagPath(opts = CLAUDE_OPTS, projectDirOverride) {
+export function getCleanupFlagPath(opts = CODEX_OPTS, projectDirOverride) {
   return _resolveProjectFile(opts, projectDirOverride, ".cleanup");
 }

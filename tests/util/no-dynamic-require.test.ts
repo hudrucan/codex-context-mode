@@ -65,8 +65,8 @@ describe("issue #511 — no inline require('node:...') in ESM-bundled sources", 
     }
   });
 
-  it("src/adapters/qwen-code/index.ts contains no inline require('node:...')", () => {
-    const src = readSrc("src/adapters/qwen-code/index.ts");
+  it("src/adapters/codex/index.ts contains no inline require('node:...')", () => {
+    const src = readSrc("src/adapters/codex/index.ts");
     expect(findInlineNodeRequires(src)).toEqual([]);
   });
 });

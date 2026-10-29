@@ -1,14 +1,9 @@
-/**
- * Auto-memory search — searches CLAUDE.md / AGENTS.md / GEMINI.md / etc.
- * and the platform's persistent memory directory for decisions,
- * preferences, and context from prior sessions.
- *
- * Returns results in a format compatible with the unified search pipeline.
- */
+/** Search Codex instructions and project-scoped persistent memories. */
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, isAbsolute } from "node:path";
-import { resolveClaudeConfigDir } from "../util/claude-config.js";
+import { resolveCodexConfigDir } from "../adapters/codex/paths.js";
+import { resolveContextModeDataRoot } from "../adapters/base.js";
 import { hashProjectDirCanonical } from "../session/db.js";
 
 const DEBUG = process.env.DEBUG?.includes("context-mode");
@@ -44,8 +39,7 @@ export interface AutoMemoryAdapter {
  *   2. User-level: <configDir>/<each instructionFile>
  *   3. Memory dir: <memoryDir>/*.md
  *
- * Without an adapter (legacy callers), defaults to Claude conventions
- * (CLAUDE.md + ~/.claude/memory) for backwards compatibility.
+ * Without an adapter, defaults to Codex instructions and memories.
  *
  * @param queries  Array of search terms
  * @param limit    Max results to return
@@ -63,21 +57,19 @@ export function searchAutoMemory(
 ): AutoMemoryResult[] {
   const results: AutoMemoryResult[] = [];
 
-  // Resolve conventions — adapter wins over explicit configDir, which wins
-  // over the historical Claude defaults.
-  const instructionFiles = adapter?.getInstructionFiles() ?? ["CLAUDE.md"];
+  const instructionFiles = adapter?.getInstructionFiles() ?? ["AGENTS.md", "AGENTS.override.md"];
   const adapterConfigDir = adapter?.getConfigDir();
-  // Issue #460 round-3: legacy fallback honors $CLAUDE_CONFIG_DIR via the
-  // canonical util so callers without an adapter still respect relocated
-  // CC config trees (and empty/whitespace env doesn't poison the path).
   const adapterRelative = adapterConfigDir ? resolveAgainst(projectDir, adapterConfigDir) : null;
-  const effectiveConfigDir = adapterRelative ?? configDir ?? resolveClaudeConfigDir();
+  const effectiveConfigDir = adapterRelative ?? configDir ?? resolveCodexConfigDir();
   // Issue #663: scope memory dir by projectDir so parallel projects can't
   // read each other's auto-memory. Adapter-aware path delegates the
   // scoping to the adapter; legacy adapterless fallback applies the same
   // hash directly so the contract holds at both call sites.
   const adapterMemoryDir = adapter?.getMemoryDir(projectDir);
-  const fallbackMemoryBase = join(effectiveConfigDir, "memory");
+  const dataRoot = resolveContextModeDataRoot();
+  const fallbackMemoryBase = dataRoot && !configDir
+    ? join(dataRoot, "context-mode", "memories")
+    : join(effectiveConfigDir, "memories");
   const fallbackMemoryDir = projectDir
     ? join(fallbackMemoryBase, hashProjectDirCanonical(projectDir))
     : fallbackMemoryBase;

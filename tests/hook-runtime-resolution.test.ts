@@ -397,8 +397,8 @@ describe("buildHookRuntimeCommand — emits bun when available, node otherwise (
       const { resetHookRuntimeCache } = await import("../src/runtime.js");
       resetHookRuntimeCache();
       const { buildHookRuntimeCommand } = await import("../src/adapters/types.js");
-      const cmd = buildHookRuntimeCommand("/plugin/hooks/pretooluse.mjs");
-      expect(cmd).toBe(`"${fakeBun}" "/plugin/hooks/pretooluse.mjs"`);
+      const cmd = buildHookRuntimeCommand("/plugin/hooks/codex/pretooluse.mjs");
+      expect(cmd).toBe(`"${fakeBun}" "/plugin/hooks/codex/pretooluse.mjs"`);
     } finally {
       if (originalHome === undefined) delete process.env.HOME;
       else process.env.HOME = originalHome;
@@ -423,9 +423,9 @@ describe("buildHookRuntimeCommand — emits bun when available, node otherwise (
     const { resetHookRuntimeCache } = await import("../src/runtime.js");
     resetHookRuntimeCache();
     const { buildHookRuntimeCommand } = await import("../src/adapters/types.js");
-    const cmd = buildHookRuntimeCommand("/plugin/hooks/pretooluse.mjs");
+    const cmd = buildHookRuntimeCommand("/plugin/hooks/codex/pretooluse.mjs");
     const nodePath = process.execPath.replace(/\\/g, "/");
-    expect(cmd).toBe(`"${nodePath}" "/plugin/hooks/pretooluse.mjs"`);
+    expect(cmd).toBe(`"${nodePath}" "/plugin/hooks/codex/pretooluse.mjs"`);
   });
 
   itPosix("output is parseable by parseNodeCommand (round-trip invariant)", async () => {
@@ -452,10 +452,10 @@ describe("buildHookRuntimeCommand — emits bun when available, node otherwise (
       const { resetHookRuntimeCache } = await import("../src/runtime.js");
       resetHookRuntimeCache();
       const { buildHookRuntimeCommand, parseNodeCommand } = await import("../src/adapters/types.js");
-      const cmd = buildHookRuntimeCommand("/plugin/hooks/pretooluse.mjs");
+      const cmd = buildHookRuntimeCommand("/plugin/hooks/codex/pretooluse.mjs");
       const parsed = parseNodeCommand(cmd);
       expect(parsed).not.toBeNull();
-      expect(parsed!.scriptPath).toBe("/plugin/hooks/pretooluse.mjs");
+      expect(parsed!.scriptPath).toBe("/plugin/hooks/codex/pretooluse.mjs");
       expect(parsed!.nodePath).toBe(fakeBun);
     } finally {
       if (originalHome === undefined) delete process.env.HOME;

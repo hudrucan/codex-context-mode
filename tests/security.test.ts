@@ -7,7 +7,7 @@
 
 import { describe, test, beforeAll, afterAll } from "vitest";
 import { strict as assert } from "node:assert";
-import { writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir, homedir } from "node:os";
 
@@ -26,6 +26,54 @@ import {
   evaluateFilePath,
   extractShellCommands,
 } from "../build/security.js";
+
+describe("Codex project policy migration", () => {
+  const expected = {
+    deny: ["Bash(sudo *)", "Bash(rm -rf /*)", "Read(.env)", "Read(**/.env*)"],
+    allow: ["Bash(git:*)", "Bash(ls:*)", "Bash(npm:*)", "Bash(npx:*)", "Bash(cat:*)", "Bash(echo:*)"],
+  };
+  let project: string;
+  let missingGlobal: string;
+
+  beforeAll(() => {
+    project = mkdtempSync(join(tmpdir(), "codex-policy-migration-"));
+    missingGlobal = join(project, "absent-global-settings.json");
+    const policy = JSON.parse(readFileSync(resolve(".codex/settings.json"), "utf8"));
+    assert.deepEqual(policy.permissions, expected, "preserve every original project deny/allow rule");
+    mkdirSync(join(project, ".codex"));
+    writeFileSync(join(project, ".codex", "settings.json"), JSON.stringify(policy));
+  });
+
+  afterAll(() => { rmSync(project, { recursive: true, force: true }); });
+
+  test("enforces the migrated policy without any Claude settings", () => {
+    const policies = readBashPolicies(project, missingGlobal);
+    assert.equal(policies.length, 1);
+    assert.deepEqual(policies[0].allow, expected.allow);
+    for (const command of ["sudo echo blocked", "rm -rf /tmp/protected"]) {
+      assert.equal(evaluateCommand(command, policies).decision, "deny", command);
+    }
+    for (const command of ["git status", "ls -la", "npm test", "npx tsc", "cat example.txt", "echo ok"]) {
+      assert.equal(evaluateCommand(command, policies).decision, "allow", command);
+    }
+    const globs = readToolDenyPatterns("Read", project, missingGlobal);
+    for (const path of [".env", "src/.env.production"]) assert.equal(evaluateFilePath(path, globs).denied, true, path);
+    assert.equal(evaluateFilePath("src/index.ts", globs).denied, false);
+  });
+
+  test("unions legacy project denies and never lets a legacy allow defeat a deny", () => {
+    mkdirSync(join(project, ".claude"));
+    const legacyPath = join(project, ".claude", "settings.json");
+    const legacy = JSON.stringify({ permissions: { deny: ["Bash(git *)", "Read(secret.txt)"], allow: ["Bash(sudo *)"] } });
+    writeFileSync(legacyPath, legacy);
+    const policies = readBashPolicies(project, missingGlobal);
+    assert.equal(evaluateCommand("git status", policies).decision, "deny");
+    assert.equal(evaluateCommand("sudo echo blocked", policies).decision, "deny");
+    const globs = readToolDenyPatterns("Read", project, missingGlobal);
+    for (const path of [".env", "src/.env.production", "secret.txt"]) assert.equal(evaluateFilePath(path, globs).denied, true, path);
+    assert.equal(readFileSync(legacyPath, "utf8"), legacy, "legacy policies are read-only inputs");
+  });
+});
 
 describe("parseBashPattern", () => {
   test("parseBashPattern: extracts glob from Bash(glob)", () => {
@@ -856,7 +904,7 @@ describe("CLAUDE_CONFIG_DIR honors security policy reader", () => {
 });
 
 /**
- * Issue #451 round-3 — cross-adapter deny-policy parity.
+ * Issue #451 round-3 — Codex deny-policy parity under foreign host env.
  *
  * `resolveClaudeGlobalSettingsPath` hardcoded the `.claude` segment, so
  * non-Claude adapters (Cursor, Codex, Qwen, Gemini, JetBrains, VS Code, etc.)
@@ -874,18 +922,19 @@ describe("CLAUDE_CONFIG_DIR honors security policy reader", () => {
  */
 describe("cross-adapter deny-policy parity (#451 round-3)", () => {
   const ADAPTER_SEGMENTS: ReadonlyArray<readonly [string, readonly string[]]> = [
-    ["cursor",            [".cursor"]],
+    ["cursor",            [".codex"]],
     ["codex",             [".codex"]],
-    ["qwen-code",         [".qwen"]],
-    ["gemini-cli",        [".gemini"]],
-    ["jetbrains-copilot", [".config", "JetBrains"]],
-    ["vscode-copilot",    [".vscode"]],
+    ["qwen-code",         [".codex"]],
+    ["gemini-cli",        [".codex"]],
+    ["jetbrains-copilot", [".codex"]],
+    ["vscode-copilot",    [".codex"]],
   ];
 
   let parityTmpBase: string;
   let savedHome: string | undefined;
   let savedUserprofile: string | undefined;
   let savedPlatform: string | undefined;
+  let savedCodexHome: string | undefined;
   let savedClaudeConfig: string | undefined;
 
   beforeAll(() => {
@@ -894,6 +943,7 @@ describe("cross-adapter deny-policy parity (#451 round-3)", () => {
     savedHome = process.env.HOME;
     savedUserprofile = process.env.USERPROFILE;
     savedPlatform = process.env.CONTEXT_MODE_PLATFORM;
+    savedCodexHome = process.env.CODEX_HOME;
     savedClaudeConfig = process.env.CLAUDE_CONFIG_DIR;
   });
 
@@ -906,6 +956,8 @@ describe("cross-adapter deny-policy parity (#451 round-3)", () => {
     else process.env.CONTEXT_MODE_PLATFORM = savedPlatform;
     if (savedClaudeConfig === undefined) delete process.env.CLAUDE_CONFIG_DIR;
     else process.env.CLAUDE_CONFIG_DIR = savedClaudeConfig;
+    if (savedCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = savedCodexHome;
     rmSync(parityTmpBase, { recursive: true, force: true });
   });
 
@@ -926,6 +978,7 @@ describe("cross-adapter deny-policy parity (#451 round-3)", () => {
       process.env.HOME = fakeHome;
       process.env.USERPROFILE = fakeHome;
       process.env.CONTEXT_MODE_PLATFORM = adapter;
+      process.env.CODEX_HOME = adapterDir;
       delete process.env.CLAUDE_CONFIG_DIR;
 
       const policies = readBashPolicies();
@@ -951,6 +1004,7 @@ describe("cross-adapter deny-policy parity (#451 round-3)", () => {
       process.env.HOME = fakeHome;
       process.env.USERPROFILE = fakeHome;
       process.env.CONTEXT_MODE_PLATFORM = adapter;
+      process.env.CODEX_HOME = adapterDir;
       delete process.env.CLAUDE_CONFIG_DIR;
 
       const result = readToolDenyPatterns("Read");
@@ -964,7 +1018,7 @@ describe("cross-adapter deny-policy parity (#451 round-3)", () => {
 
   test("union semantics: claude global is also read when non-claude adapter active", () => {
     const fakeHome = join(parityTmpBase, "union-home");
-    const cursorDir = join(fakeHome, ".cursor");
+    const cursorDir = join(fakeHome, ".codex");
     const claudeDir = join(fakeHome, ".claude");
     mkdirSync(cursorDir, { recursive: true });
     mkdirSync(claudeDir, { recursive: true });
@@ -980,6 +1034,7 @@ describe("cross-adapter deny-policy parity (#451 round-3)", () => {
     process.env.HOME = fakeHome;
     process.env.USERPROFILE = fakeHome;
     process.env.CONTEXT_MODE_PLATFORM = "cursor";
+    process.env.CODEX_HOME = cursorDir;
     delete process.env.CLAUDE_CONFIG_DIR;
 
     const policies = readBashPolicies();

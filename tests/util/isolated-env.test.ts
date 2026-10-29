@@ -4,7 +4,7 @@
  * reads, then restores the originals on `restore()`.
  *
  * Why this exists: `tests/setup-home.ts` only sets HOME/USERPROFILE/HOMEDRIVE/
- * HOMEPATH. On Windows, adapter aggregation (`getMultiAdapterLifetimeStats`,
+ * HOMEPATH. On Windows, adapter aggregation (`getLifetimeStats`,
  * OpenCode's `getConfigDir`, runtime bun fallbacks) reads APPDATA, LOCALAPPDATA,
  * XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_CACHE_HOME — so real adapter dirs leak
  * into render output. PR #515's BRAND_NEW assertion fails because of this.
@@ -144,21 +144,21 @@ describe("withIsolatedEnv() — Slice 2: keepXdg opt-in", () => {
 });
 
 describe("withIsolatedEnv() — Slice 3: analytics surface zero adapter rows", () => {
-  test("getMultiAdapterLifetimeStats returns zero events under isolated env", async () => {
+  test("getLifetimeStats returns zero events under isolated env", async () => {
     const { fakeHome, restore } = withIsolatedEnv();
 
     try {
       // Late import so the helper's homedir spy is in place before the
       // analytics module captures it. Analytics defaults `home` to homedir().
-      const { getMultiAdapterLifetimeStats } = await import(
+      const { getLifetimeStats } = await import(
         "../../src/session/analytics.js"
       );
 
-      const stats = getMultiAdapterLifetimeStats();
+      const stats = getLifetimeStats();
 
       expect(stats.totalEvents, "no adapter dirs exist under fakeHome").toBe(0);
       expect(stats.totalSessions).toBe(0);
-      expect(stats.totalBytes).toBe(0);
+      expect(stats.autoMemoryCount).toBe(0);
 
       // Sanity: fakeHome is empty — no adapter has ever written to it.
       expect(existsSync(fakeHome)).toBe(true);

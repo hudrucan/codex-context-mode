@@ -44,12 +44,12 @@ beforeAll(() => {
   // Verify build/session/ does NOT exist in our fake install
   expect(existsSync(join(fakePluginDir, "build", "session"))).toBe(false);
 
-  // Fake project dir (value for CLAUDE_PROJECT_DIR)
+  // Fake project dir (value for CONTEXT_MODE_PROJECT_DIR)
   fakeProjectDir = mkdtempSync(join(tmpdir(), "ctx-project-"));
 
   // Fake HOME so getSessionDBPath() writes to an isolated location
   fakeHomeDir = mkdtempSync(join(tmpdir(), "ctx-fakehome-"));
-  sessionDBDir = join(fakeHomeDir, ".claude", "context-mode", "sessions");
+  sessionDBDir = join(fakeHomeDir, ".codex", "context-mode", "sessions");
   codexSessionDBDir = join(fakeHomeDir, ".codex", "context-mode", "sessions");
 });
 
@@ -60,16 +60,17 @@ afterAll(() => {
 });
 
 function runHook(hookFile: string, input: Record<string, unknown>, env?: Record<string, string>) {
-  const hookPath = join(fakePluginDir, "hooks", hookFile);
+  const hookPath = join(fakePluginDir, "hooks", hookFile.startsWith("codex/") ? hookFile : "codex/" + hookFile);
   const result = spawnSync("node", [hookPath], {
-    input: JSON.stringify(input),
+    input: JSON.stringify({ session_id: "test-session-117", cwd: fakeProjectDir, ...input }),
     encoding: "utf-8",
     timeout: 30_000,
     env: {
       ...process.env,
-      CLAUDE_PROJECT_DIR: fakeProjectDir,
+      CONTEXT_MODE_PROJECT_DIR: fakeProjectDir,
       CLAUDE_SESSION_ID: "test-session-117",
-      CONTEXT_MODE_PLATFORM: "claude-code",
+      CONTEXT_MODE_PLATFORM: "codex",
+      CODEX_HOME: join(fakeHomeDir, ".codex"),
       // Isolate DB writes to fake HOME
       HOME: fakeHomeDir,
       USERPROFILE: fakeHomeDir,

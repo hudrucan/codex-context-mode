@@ -33,7 +33,7 @@ import { dirname } from "node:path";
 import { SessionDB } from "../../src/session/db.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const HOOK_PATH = join(__dirname, "..", "..", "hooks", "sessionstart.mjs");
+const HOOK_PATH = join(__dirname, "..", "..", "hooks", "codex", "sessionstart.mjs");
 
 const cleanups: Array<() => void> = [];
 afterAll(() => {

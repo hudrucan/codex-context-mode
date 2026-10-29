@@ -60,7 +60,7 @@ describe("start.mjs Linux re-exec proxy lifecycle (#862)", () => {
   const PROXY_BLOCK = sliceBetween(
     START_MJS,
     "// ── Linux: re-exec with Bun",
-    "// ── Self-heal Layer 1",
+    "// ── Algo-D4: plugin cache integrity check",
   );
   const compact = stripWs(PROXY_BLOCK);
 

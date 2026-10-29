@@ -20,22 +20,10 @@ AGENTS.md
 context-mode-guidance-*/
 .claude/worktrees/
 
-# .mcp.json is local-only — purpose splits between contributor dev
-# (relative paths work because cwd = repo root) and end-user marketplace
-# install (placeholder ${CLAUDE_PLUGIN_ROOT}/start.mjs is required).
-# These two forms have flip-flopped 3 times in history (#253 #531 etc),
-# causing every fresh install to silently break. End users get MCP via
-# .claude-plugin/plugin.json (always placeholder) and /ctx-upgrade's
-# cli.ts write (always placeholder). The .mcp.json at repo root only
-# helps contributors during local dev. Untracked → can't regress.
-# Copy .mcp.json.example to .mcp.json for local dev.
+# .mcp.json is local-only. For standalone Codex development, adapt
+# .mcp.json.codex.example with an absolute launcher path.
+# The Codex plugin uses the tracked .codex-plugin/mcp.json instead.
 .mcp.json
-# Exception: the GitHub Copilot CLI plugin bundle ships its OWN .mcp.json (a
-# Copilot plugin discovers MCP from a `.mcp.json` in its root — real marketplace
-# plugins do the same). It is the plugin's config, NOT the repo-root dev file the
-# rule above guards, so un-ignore exactly this one path. It pins
-# CONTEXT_MODE_PLATFORM=copilot-cli so the server self-identifies as Copilot.
-!configs/copilot-cli/.mcp.json
 .claude-worktrees/
 .vibetree/
 .cw/

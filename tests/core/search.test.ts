@@ -2896,10 +2896,10 @@ describe("sort=timeline merges 3 sources chronologically", () => {
 
     // Create auto-memory files
     const configDir = createTempDir();
-    const memoryDir = join(configDir, "memory");
+    const memoryDir = join(configDir, "memories");
     mkdirSync(memoryDir, { recursive: true });
     writeFileSync(
-      join(configDir, "CLAUDE.md"),
+      join(configDir, "AGENTS.md"),
       "# Deploy Rules\nAlways deploy to staging first.\n",
     );
 
@@ -3088,16 +3088,16 @@ describe("default sort is relevance (backward compatible)", () => {
 
 describe("searchAutoMemory", () => {
   const AUTO_MEM_ROOT = join(tmpdir(), `ctx-auto-memory-test-${Date.now()}`);
-  const CLAUDE_CONFIG = join(AUTO_MEM_ROOT, ".claude");
+  const CLAUDE_CONFIG = join(AUTO_MEM_ROOT, ".codex");
   const QWEN_CONFIG = join(AUTO_MEM_ROOT, ".qwen");
   const PROJECT_DIR = join(AUTO_MEM_ROOT, "project");
 
   // Set up fixture files once
   (() => {
-    // Create project-level CLAUDE.md
+    // Create project-level AGENTS.md
     mkdirSync(PROJECT_DIR, { recursive: true });
     writeFileSync(
-      join(PROJECT_DIR, "CLAUDE.md"),
+      join(PROJECT_DIR, "AGENTS.md"),
       "Project instructions: use TypeScript strict mode. Analytics pipeline config here.",
     );
 
@@ -3108,13 +3108,13 @@ describe("searchAutoMemory", () => {
     //   - projectDir=undefined  (legacy) → reads <CLAUDE_CONFIG>/memory
     // Write fixtures to BOTH so each call shape sees the same content.
     const projectHash = hashProjectDirCanonical(PROJECT_DIR);
-    const claudeMemScoped = join(CLAUDE_CONFIG, "memory", projectHash);
-    const claudeMemLegacy = join(CLAUDE_CONFIG, "memory");
+    const claudeMemScoped = join(CLAUDE_CONFIG, "memories", projectHash);
+    const claudeMemLegacy = join(CLAUDE_CONFIG, "memories");
     mkdirSync(claudeMemScoped, { recursive: true });
     mkdirSync(claudeMemLegacy, { recursive: true });
 
     writeFileSync(
-      join(CLAUDE_CONFIG, "CLAUDE.md"),
+      join(CLAUDE_CONFIG, "AGENTS.md"),
       "Global user preferences: dark theme, vim keybindings.",
     );
 
@@ -3131,9 +3131,9 @@ describe("searchAutoMemory", () => {
 
     // Create user-level configDir for .qwen — Qwen tests below pass
     // projectDir=undefined, so the unscoped path is the right fixture target.
-    const qwenMemDir = join(QWEN_CONFIG, "memory");
+    const qwenMemDir = join(QWEN_CONFIG, "memories");
     mkdirSync(qwenMemDir, { recursive: true });
-    writeFileSync(join(QWEN_CONFIG, "CLAUDE.md"), "Qwen user config.");
+    writeFileSync(join(QWEN_CONFIG, "AGENTS.md"), "Qwen user config.");
     writeFileSync(join(qwenMemDir, "note.md"), "Qwen analytics note content.");
   })();
 
@@ -3174,9 +3174,9 @@ describe("searchAutoMemory", () => {
 
   test("respects limit parameter", () => {
     const bulkConfig = join(AUTO_MEM_ROOT, ".bulk-test");
-    const bulkMemDir = join(bulkConfig, "memory");
+    const bulkMemDir = join(bulkConfig, "memories");
     mkdirSync(bulkMemDir, { recursive: true });
-    writeFileSync(join(bulkConfig, "CLAUDE.md"), "bulk keyword_match config.");
+    writeFileSync(join(bulkConfig, "AGENTS.md"), "bulk keyword_match config.");
     for (let i = 0; i < 20; i++) {
       writeFileSync(
         join(bulkMemDir, `note_${i.toString().padStart(3, "0")}.md`),
@@ -3251,10 +3251,10 @@ describe("searchAutoMemory", () => {
     expect(r.title).toContain("[auto-memory]");
   });
 
-  test("finds content in CLAUDE.md files (unified)", () => {
+  test("finds content in AGENTS.md files (unified)", () => {
     const configDir = createTempDir();
     writeFileSync(
-      join(configDir, "CLAUDE.md"),
+      join(configDir, "AGENTS.md"),
       "# Rules\nAlways use TypeScript strict mode.\nNever skip tests.\n",
     );
 
@@ -3266,7 +3266,7 @@ describe("searchAutoMemory", () => {
 
   test("finds content in memory directory (unified)", () => {
     const configDir = createTempDir();
-    const memoryDir = join(configDir, "memory");
+    const memoryDir = join(configDir, "memories");
     mkdirSync(memoryDir, { recursive: true });
     writeFileSync(
       join(memoryDir, "preferences.md"),

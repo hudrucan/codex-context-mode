@@ -19,7 +19,7 @@ import { renderTaskState, type StoredEvent } from "../../src/session/snapshot.js
 import { buildSessionDirective, writeSessionEventsFile, groupEvents } from "../../hooks/session-directive.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const HOOK_PATH = join(__dirname, "..", "..", "hooks", "sessionstart.mjs");
+const HOOK_PATH = join(__dirname, "..", "..", "hooks", "codex", "sessionstart.mjs");
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -145,7 +145,7 @@ describe("SessionStart Hook — /resume snapshot fallback (#413)", () => {
         ...process.env,
         HOME: tmpHome,
         USERPROFILE: tmpHome,           // Windows compat
-        CLAUDE_PROJECT_DIR: projectDir,
+        CONTEXT_MODE_PROJECT_DIR: projectDir,
       },
     });
     return {
@@ -167,13 +167,13 @@ describe("SessionStart Hook — /resume snapshot fallback (#413)", () => {
     // path we seed and the path the hook reads stay in lockstep.
     prevHome = process.env.HOME;
     prevUserProfile = process.env.USERPROFILE;
-    prevProjectDir = process.env.CLAUDE_PROJECT_DIR;
+    prevProjectDir = process.env.CONTEXT_MODE_PROJECT_DIR;
     process.env.HOME = tmpHome;
     process.env.USERPROFILE = tmpHome;
-    process.env.CLAUDE_PROJECT_DIR = projectDir;
+    process.env.CONTEXT_MODE_PROJECT_DIR = projectDir;
 
     const { getSessionDBPath } = await import("../../hooks/session-helpers.mjs");
-    dbPath = getSessionDBPath();
+    dbPath = getSessionDBPath(undefined, projectDir);
 
     const { mkdirSync } = await import("node:fs");
     const { dirname: d } = await import("node:path");
@@ -190,16 +190,16 @@ describe("SessionStart Hook — /resume snapshot fallback (#413)", () => {
     rmSync(projectDir, { recursive: true, force: true });
     if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome;
     if (prevUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = prevUserProfile;
-    if (prevProjectDir === undefined) delete process.env.CLAUDE_PROJECT_DIR; else process.env.CLAUDE_PROJECT_DIR = prevProjectDir;
+    if (prevProjectDir === undefined) delete process.env.CONTEXT_MODE_PROJECT_DIR; else process.env.CONTEXT_MODE_PROJECT_DIR = prevProjectDir;
   });
 
-  it("falls back to snapshot when resumed session has no live events", () => {
+  it("restores its own snapshot after compact without live events", () => {
     // /resume creates a fresh active session_id whose events table is empty —
     // the prior snapshot must still surface.
     const result = runHookIn({
       hook_event_name: "SessionStart",
-      source: "resume",
-      session_id: "fresh-resume-uuid",
+      source: "compact",
+      session_id: "prior-session-uuid",
       cwd: projectDir,
     });
 

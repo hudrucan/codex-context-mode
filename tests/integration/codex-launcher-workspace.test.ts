@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { PLATFORM_ENV_VARS } from "../../src/adapters/detect.js";
 import { hashProjectDirCanonical } from "../../src/session/db.js";
 
 const alpha = "11111111-1111-4111-8111-111111111111";
@@ -58,9 +57,6 @@ async function launch(
     writeFileSync(join(sessions, `${id}.jsonl`), JSON.stringify({ type: "session_meta", payload: { id, cwd } }) + "\n");
   }
   const env = Object.fromEntries(Object.entries(process.env).filter((e): e is [string, string] => typeof e[1] === "string"));
-  for (const entries of PLATFORM_ENV_VARS.values()) {
-    for (const { name } of entries) delete env[name];
-  }
   for (const key of ["CONTEXT_MODE_PLATFORM", "CONTEXT_MODE_PROJECT_DIR", "CONTEXT_MODE_PROJECT_DIR_SOURCE", "CONTEXT_MODE_DIR", "CONTEXT_MODE_DATA_DIR", "CONTEXT_MODE_SESSION_DIR", "CONTEXT_MODE_SESSION_SUFFIX", "CONTEXT_MODE_EMBEDDED_PLUGIN_TOOLS"]) delete env[key];
   Object.assign(env, {
     HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: join(home, ".claude"),
@@ -104,6 +100,69 @@ async function probe(client: Client, threadId?: unknown) {
 }
 
 describe("Codex workspace routing through production start.mjs", () => {
+  it("enforces project Codex and legacy denies without leaking policies across threads", async () => {
+    const codexPolicy = join(repoA, ".codex", "settings.json");
+    const legacyPolicy = join(repoA, ".claude", "settings.json");
+    mkdirSync(dirname(codexPolicy), { recursive: true });
+    mkdirSync(dirname(legacyPolicy), { recursive: true });
+    writeFileSync(codexPolicy, JSON.stringify({ permissions: {
+      deny: ["Read(policy-secret.js)"], allow: ["Read(legacy-secret.js)"],
+    } }));
+    const legacyBytes = JSON.stringify({ permissions: {
+      deny: ["Read(legacy-secret.js)"], allow: ["Read(policy-secret.js)"],
+    } });
+    writeFileSync(legacyPolicy, legacyBytes);
+    for (const workspace of [repoA, repoB]) {
+      for (const file of ["policy-secret.js", "legacy-secret.js"]) {
+        writeFileSync(join(workspace, file), "console.log('POLICY_FILE_EXECUTED');\n");
+      }
+    }
+    try {
+      const client = await launch({}, { clientName: "codex-mcp-client", platform: null });
+      for (const file of ["policy-secret.js", "legacy-secret.js"]) {
+        const denied = await client.callTool({ name: "ctx_execute_file", _meta: { threadId: alpha },
+          arguments: { language: "javascript", path: file, code: "console.log(FILE_CONTENT);" } });
+        expect(denied.isError).toBe(true);
+        expect(JSON.stringify(denied.content)).not.toContain("POLICY_FILE_EXECUTED");
+        const allowed = await client.callTool({ name: "ctx_execute_file", _meta: { threadId: beta },
+          arguments: { language: "javascript", path: file, code: "console.log(FILE_CONTENT);" } });
+        expect(allowed.isError, JSON.stringify(allowed.content)).not.toBe(true);
+        expect(JSON.stringify(allowed.content)).toContain("POLICY_FILE_EXECUTED");
+      }
+      expect(readFileSync(legacyPolicy, "utf8")).toBe(legacyBytes);
+    } finally {
+      rmSync(codexPolicy);
+      rmSync(legacyPolicy);
+      for (const workspace of [repoA, repoB]) {
+        for (const file of ["policy-secret.js", "legacy-secret.js"]) rmSync(join(workspace, file));
+      }
+    }
+  });
+
+  it.each(["CONTEXT_MODE_DIR", "CONTEXT_MODE_DATA_DIR"])("preserves %s across restart and concurrent repositories", async (key) => {
+    const storage = mkdtempSync(join(root, "storage-"));
+    const overrides = { [key]: storage };
+    const first = await launch(overrides, { platform: null });
+    const expectedContent = key === "CONTEXT_MODE_DATA_DIR"
+      ? join(storage, "context-mode", "content") : join(storage, "content");
+    for (const [threadId, repo, marker] of [[alpha, repoA, "ALPHA"], [beta, repoB, "BETA"]]) {
+      const result = await first.callTool({ name: "ctx_index", _meta: { threadId }, arguments: { content: "StorageIsolation " + marker, source: "storage-fixture" } });
+      expect(result.isError).not.toBe(true);
+      const db = join(expectedContent, hashProjectDirCanonical(repo) + ".db");
+      expect(readFileSync(db).subarray(0, 16).toString()).toBe("SQLite format 3\0");
+    }
+    expect(existsSync(join(clientPaths.get(first)!.codexHome, "context-mode", "content"))).toBe(false);
+    await first.close();
+    const resumed = await launch(overrides, { platform: null });
+    const results = await Promise.all([alpha, beta].map(threadId => resumed.callTool({ name: "ctx_search", _meta: { threadId }, arguments: { queries: ["StorageIsolation"], source: "storage-fixture" } })));
+    for (let i = 0; i < results.length; i++) {
+      expect(results[i].isError).not.toBe(true);
+      const output = (results[i].content as Array<{ text?: string }>).map(c => c.text ?? "").join("\n");
+      expect(output).toContain(i === 0 ? "ALPHA" : "BETA");
+      expect(output).not.toContain(i === 0 ? "BETA" : "ALPHA");
+    }
+  });
+
   it("does not generate an upstream upgrade command through MCP", async () => {
     const client = await launch({}, { clientName: "codex-mcp-client", platform: null });
     const result = await client.callTool({ name: "ctx_upgrade", _meta: { threadId: alpha }, arguments: {} });

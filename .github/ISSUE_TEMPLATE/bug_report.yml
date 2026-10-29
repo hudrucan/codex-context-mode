@@ -65,7 +65,7 @@ body:
     attributes:
       label: context-mode version
       description: |
-        Shown in the debug script output. Must be the latest. If not, upgrade first.
+        Include the version and Git revision of your reviewed local checkout.
       placeholder: "e.g. 0.9.23"
     validations:
       required: true
@@ -73,18 +73,16 @@ body:
   - type: textarea
     id: debug-output
     attributes:
-      label: Debug script output (REQUIRED)
+      label: Diagnostic output (REQUIRED)
       description: |
-        Run the diagnostic script and paste the JSON output:
+        Run diagnostics from your local checkout and paste the output:
         ```
-        bash scripts/ctx-debug.sh
-        cat /tmp/ctx-debug-*.json   # paste this
+        context-mode doctor
         ```
-        If installed via npm: `bash "$(npm root -g)/context-mode/scripts/ctx-debug.sh"`
-        The script writes a JSON file to /tmp — copy its contents here.
-        **Issues without debug output will be closed immediately.**
-      placeholder: "Paste the contents of /tmp/ctx-debug-<timestamp>.json"
-      render: json
+        Alternatively, run the ctx_doctor MCP tool. Include your OS and installation path.
+        Self-upgrade is disabled for this fork; do not install an upstream release over it.
+      placeholder: "Paste diagnostic output, OS, and installation path"
+      render: text
     validations:
       required: true
 
@@ -137,8 +135,8 @@ body:
         Remember: your AI agent can read our source code. Ask it to help.
       placeholder: |
         - Upgraded to latest version
-        - Read hooks/pretooluse.mjs, found that...
-        - Tried running the hook manually: node hooks/pretooluse.mjs <<< '...'
+        - Read hooks/codex/pretooluse.mjs, found that...
+        - Tried running the hook manually with a Codex hook payload...
     validations:
       required: true
 

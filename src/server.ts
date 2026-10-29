@@ -415,7 +415,6 @@ export function getProjectDir(): string {
     cwd: process.cwd(),
     pwd: process.env.PWD,
     transcriptMaxAgeMs: 5 * 60 * 1000,
-    strictPlatform: "codex",
     codexHome: resolveCodexConfigDir(),
   });
 }
@@ -655,7 +654,7 @@ function sanitizeSessionId(raw: string): string {
 }
 
 function getStatsFilePath(): string {
-  const raw = process.env.CLAUDE_SESSION_ID || `pid-${process.ppid}`;
+  const raw = projectDirOverride.getStore()?.sessionId ?? `pid-${process.ppid}`;
   const sessionId = sanitizeSessionId(raw);
   const statsDir = ensureWritableStorageDir(resolveStatsStorageDir(getDefaultSessionDir));
   return join(statsDir, `stats-${sessionId}.json`);
@@ -1136,7 +1135,6 @@ function truncateCommandForEcho(command: string): string {
  * no-server-timer behavior there (Issue #406 — long builds need an unbounded
  * run). A caller can still pass an explicit `timeout` to override on any host.
  */
-export const AGY_DEFAULT_EXEC_TIMEOUT_MS = 120_000;
 function resolveExecTimeout(timeout: number | undefined): number | undefined {
   return timeout;
 }
@@ -3625,7 +3623,6 @@ server.registerTool(
           // can show "Where it came from" + the "across N AI tools"
           // headline. Best-effort — failures absorbed so a corrupt
           // sidecar in any adapter dir cannot break ctx_stats.
-          let multiAdapter;
           // Codex-only: lifetime is already scoped to getSessionDir().
           // F1: wire conversation + realBytes opts so formatReport renders the
           // narrative 5-section "kitap gibi" layout (timeline, ladder, receipt,
@@ -3736,7 +3733,7 @@ server.registerTool(
           // be unavailable on cold paths; failures are absorbed.
           let indexState;
           try { indexState = getStore().getIndexState(); } catch { /* never block ctx_stats */ }
-          text = formatReport(report, VERSION, _latestVersion, { lifetime, mcpUsage, multiAdapter, conversation, realBytes, indexState, cwd: projectDir });
+          text = formatReport(report, VERSION, _latestVersion, { lifetime, mcpUsage, conversation, realBytes, indexState, cwd: projectDir });
         } finally {
           sdb.close();
         }
@@ -3749,11 +3746,10 @@ server.registerTool(
         if (_detectedAdapter?.name === "Pi") {
           patchPiLifetimeFromStatsFiles(lifetime, getSessionDir());
         }
-        let multiAdapter;
         // Codex-only: lifetime is already scoped to getSessionDir().
         let indexState;
         try { indexState = getStore().getIndexState(); } catch { /* never block ctx_stats */ }
-        text = formatReport(report, VERSION, _latestVersion, { lifetime, multiAdapter, indexState });
+        text = formatReport(report, VERSION, _latestVersion, { lifetime, indexState });
       }
     } catch {
       // Session DB not available or incompatible — build minimal report from runtime stats
@@ -3764,9 +3760,8 @@ server.registerTool(
       if (_detectedAdapter?.name === "Pi" && lifetime) {
         patchPiLifetimeFromStatsFiles(lifetime, getSessionDir());
       }
-      let multiAdapter;
       // Codex-only: lifetime is already scoped to getSessionDir().
-      text = formatReport(report, VERSION, _latestVersion, (lifetime || multiAdapter) ? { lifetime, multiAdapter } : undefined);
+      text = formatReport(report, VERSION, _latestVersion, lifetime ? { lifetime } : undefined);
     }
 
     return trackResponse("ctx_stats", {

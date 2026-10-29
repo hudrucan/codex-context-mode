@@ -351,12 +351,13 @@ function readSingleSettings(path: string): SecurityPolicy | null {
 }
 
 /**
- * Read Bash permission policies from up to 3 settings files.
+ * Read context-mode permission policies for the project and user.
  *
  * Returns policies in precedence order (most local first):
- *   1. .claude/settings.local.json  (project-local)
- *   2. .claude/settings.json        (project-shared)
- *   3. ~/.claude/settings.json      (global)
+ *   1. .codex/settings.json         (project-shared context-mode policy)
+ *   2. .claude/settings.local.json  (legacy project-local policy)
+ *   3. .claude/settings.json        (legacy project-shared policy)
+ *   4. Codex and legacy Claude global settings (or the explicit override)
  *
  * Missing or invalid files are silently skipped.
  */
@@ -367,6 +368,9 @@ export function readBashPolicies(
   const policies: SecurityPolicy[] = [];
 
   if (projectDir) {
+    const codexPolicy = readSingleSettings(resolve(projectDir, ".codex", "settings.json"));
+    if (codexPolicy) policies.push(codexPolicy);
+
     const localPath = resolve(projectDir, ".claude", "settings.local.json");
     const localPolicy = readSingleSettings(localPath);
     if (localPolicy) policies.push(localPolicy);
@@ -461,6 +465,9 @@ export function readToolPermissionPatterns(
   };
 
   if (projectDir) {
+    const codexGlobs = extractGlobs(resolve(projectDir, ".codex", "settings.json"));
+    if (codexGlobs !== null) result.push(codexGlobs);
+
     const localGlobs = extractGlobs(
       resolve(projectDir, ".claude", "settings.local.json"),
     );

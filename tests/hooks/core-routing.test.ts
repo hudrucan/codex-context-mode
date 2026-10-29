@@ -395,23 +395,6 @@ describe("routePreToolUse", () => {
       expect(result!.reason).toContain(url);
     });
 
-    it("treats agy read_url_content URL payloads as WebFetch", () => {
-      const url = "https://example.com/docs";
-      const result = routePreToolUse(
-        "read_url_content",
-        { URL: url },
-        undefined,
-        "antigravity-cli",
-        "agy-read-url",
-      );
-      expect(result).not.toBeNull();
-      expect(result!.action).toBe("deny");
-      expect(result!.reason).toContain(url);
-      // agy's call surface is context-mode/<tool> (see hooks/core/tool-naming.mjs),
-      // not Claude's mcp__context-mode__<tool> form.
-      expect(result!.reason).toContain("context-mode/ctx_fetch_and_index");
-    });
-
     it("treats mcp_web_fetch as WebFetch and blocks it", () => {
       const url = "https://example.com";
       const result = routePreToolUse("mcp_web_fetch", { url });
@@ -468,27 +451,6 @@ describe("routePreToolUse", () => {
       expect(result).not.toBeNull();
       expect(result!.action).toBe("deny");
       expect(result!.reason).toContain("ctx_fetch_and_index");
-    });
-
-    it("Claude Code pretooluse treats subagent hook payloads as ctx_* unavailable (#794)", async () => {
-      const main = await spawnPreToolUseHook({
-        tool_name: "WebFetch",
-        tool_input: { url: "https://example.com" },
-        session_id: "core-routing-main-webfetch",
-      });
-      expect(main.status).toBe(0);
-      expect(main.parsed?.hookSpecificOutput?.permissionDecision).toBe("deny");
-      expect(main.parsed?.hookSpecificOutput?.permissionDecisionReason).toContain("ctx_fetch_and_index");
-
-      const subagent = await spawnPreToolUseHook({
-        tool_name: "WebFetch",
-        tool_input: { url: "https://example.com" },
-        session_id: "core-routing-subagent-webfetch",
-        agent_id: "agent-794",
-        agent_type: "claude-code-guide",
-      });
-      expect(subagent.status).toBe(0);
-      expect(subagent.stdout).toBe("");
     });
   });
 
@@ -550,7 +512,7 @@ describe("routePreToolUse", () => {
       expect(prompt).toContain("<tool_selection_hierarchy>");
     });
 
-    it("injects Claude Code Agent routing and ToolSearch bootstrap by default", () => {
+    it("injects Codex Agent routing without a foreign deferred-tool bootstrap", () => {
       const result = routePreToolUse("Agent", {
         prompt: "Research this repository",
         subagent_type: "general-purpose",
@@ -559,7 +521,7 @@ describe("routePreToolUse", () => {
       expect(result!.action).toBe("modify");
       const prompt = (result!.updatedInput as Record<string, string>).prompt;
       expect(prompt).toContain("<context_window_protection>");
-      expect(prompt).toContain("ToolSearch");
+      expect(prompt).not.toContain("ToolSearch");
       expect(prompt).not.toContain("<ctx_commands>");
     });
 
@@ -641,35 +603,6 @@ describe("routePreToolUse", () => {
         },
       );
       expect(result).toBeNull();
-    });
-
-    it("pins Claude Code ctx_execute shell cwd from hook projectDir (#756)", () => {
-      const result = routePreToolUse(
-        "mcp__plugin_context-mode_context-mode__ctx_execute",
-        { language: "shell", code: "pwd" },
-        "/worktree/repo",
-        "claude-code",
-      );
-      expect(result?.action).toBe("modify");
-      expect(result?.updatedInput).toEqual({
-        language: "shell",
-        code: "pwd",
-        cwd: "/worktree/repo",
-      });
-    });
-
-    it("pins Claude Code ctx_batch_execute cwd from hook projectDir (#756)", () => {
-      const result = routePreToolUse(
-        "mcp__plugin_context-mode_context-mode__ctx_batch_execute",
-        { commands: [{ label: "branch", command: "git rev-parse --abbrev-ref HEAD" }] },
-        "/worktree/repo",
-        "claude-code",
-      );
-      expect(result?.action).toBe("modify");
-      expect(result?.updatedInput).toEqual({
-        commands: [{ label: "branch", command: "git rev-parse --abbrev-ref HEAD" }],
-        cwd: "/worktree/repo",
-      });
     });
 
     it("does not overwrite explicit ctx_execute cwd", () => {
@@ -1262,16 +1195,6 @@ describe("buildSecurityWarningContext — agent-facing security warning (#558)",
     expect(r.parsed.warning).toMatch(/<context_mode_security_warning>|security_warning/);
     // Must point users at the actionable fix.
     expect(r.parsed.warning).toMatch(/npm run bundle|security\.bundle\.mjs|reinstall/i);
-  });
-
-  it("hooks/sessionstart.mjs wires initSecurity + buildSecurityWarningContext into the SessionStart additionalContext", () => {
-    // Static-source check — the wiring must be present in the
-    // top-level Claude Code SessionStart hook so users see the
-    // warning in-band on first session of a broken install.
-    const src = readFileSync(resolve(SLICE4_DIRNAME, "..", "..", "hooks", "sessionstart.mjs"), "utf-8");
-    expect(src).toContain("initSecurity");
-    expect(src).toContain("buildSecurityWarningContext");
-    expect(src).toContain("isSecurityInitFailed");
   });
 });
 

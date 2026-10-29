@@ -39,14 +39,6 @@ describe("scripts/version-sync.mjs targets", () => {
     expect(SCRIPT_SRC).toContain('".codex-plugin/plugin.json"');
   });
 
-  it("includes configs/antigravity-cli/plugin.json (agy native bundle)", () => {
-    expect(SCRIPT_SRC).toContain('"configs/antigravity-cli/plugin.json"');
-  });
-
-  it("includes configs/copilot-cli/.github/plugin/plugin.json (Copilot CLI bundle)", () => {
-    expect(SCRIPT_SRC).toContain('"configs/copilot-cli/.github/plugin/plugin.json"');
-  });
-
   it("does NOT include .codex-plugin/marketplace.json (Codex never reads that path)", () => {
     // Codex CLI's MARKETPLACE_MANIFEST_RELATIVE_PATHS constant
     // (refs/platforms/codex/codex-rs/core-plugins/src/marketplace.rs:21)
@@ -64,14 +56,6 @@ describe("scripts/version-sync.mjs targets", () => {
 describe("package.json `version` script `git add` list", () => {
   it("includes .codex-plugin/plugin.json", () => {
     expect(PKG_JSON.scripts.version).toContain(".codex-plugin/plugin.json");
-  });
-
-  it("includes configs/antigravity-cli/plugin.json (agy native bundle)", () => {
-    expect(PKG_JSON.scripts.version).toContain("configs/antigravity-cli/plugin.json");
-  });
-
-  it("includes configs/copilot-cli/.github/plugin/plugin.json (Copilot CLI bundle)", () => {
-    expect(PKG_JSON.scripts.version).toContain("configs/copilot-cli/.github/plugin/plugin.json");
   });
 
   it("does NOT include .codex-plugin/marketplace.json (file is removed — Codex never reads it)", () => {

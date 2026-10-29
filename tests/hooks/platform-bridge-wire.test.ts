@@ -318,7 +318,7 @@ describe("platform-bridge wire — session-loaders forwards events", () => {
     const body = JSON.parse(fetchSpy.mock.calls[0][1].body as string);
 
     // Envelope metadata
-    expect(body.platform).toBe("claude-code");
+    expect(body.platform).toBe("codex");
     expect(typeof body.ts).toBe("number");
 
     // Canonical event fields

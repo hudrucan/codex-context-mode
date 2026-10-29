@@ -1241,22 +1241,4 @@ describe("Codex matcher #547 — is_exact_matcher charset compliance", () => {
     const matcher = parsed.hooks.PreToolUse[0]?.matcher ?? "";
     expect(matcher).toMatch(EXACT_MATCHER_CHARSET);
   });
-
-  it("hooks/hooks.json (universal bundle) MCP catch-all matcher passes is_exact_matcher charset", () => {
-    // hooks/hooks.json is the universal bundled file Codex ALSO loads via
-    // the plugin cache. The MCP catch-all matcher must drop the lookahead so
-    // Codex's regex crate does not reject the file at boot. Claude Code
-    // continues to treat the literal `mcp__` as a substring matcher.
-    const path = resolve(__dirname, "..", "..", "hooks", "hooks.json");
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as {
-      hooks: { PreToolUse: Array<{ matcher: string }> };
-    };
-    const matchers = (parsed.hooks.PreToolUse ?? []).map((e) => e.matcher);
-    // Whichever entry was the external-MCP catch-all must now be charset-clean.
-    const mcpCatchAll = matchers.find(
-      (m) => m && m.startsWith("mcp__") && !m.includes("ctx_"),
-    );
-    expect(mcpCatchAll, "expected an mcp__ catch-all matcher in hooks.json").toBeDefined();
-    expect(mcpCatchAll).toMatch(EXACT_MATCHER_CHARSET);
-  });
 });

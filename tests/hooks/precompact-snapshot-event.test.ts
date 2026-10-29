@@ -25,7 +25,7 @@ const _hashCanonical = (p: string) => createHash("sha256").update(
 ).digest("hex").slice(0, 16);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PRECOMPACT_PATH = join(__dirname, "..", "..", "hooks", "precompact.mjs");
+const PRECOMPACT_PATH = join(__dirname, "..", "..", "hooks", "codex", "precompact.mjs");
 
 interface RawEventRow {
   type: string;
@@ -62,8 +62,8 @@ describe("precompact.mjs — snapshot-built event (D2 PRD Phase 6.1)", () => {
     env = {
       HOME: fakeHome,
       USERPROFILE: fakeHome,
-      CLAUDE_CONFIG_DIR: join(fakeHome, ".claude"),
-      CLAUDE_PROJECT_DIR: fakeProject,
+      CODEX_HOME: join(fakeHome, ".codex"),
+      CONTEXT_MODE_PROJECT_DIR: fakeProject,
       CLAUDE_SESSION_ID: sessionId,
       CONTEXT_MODE_SESSION_SUFFIX: "",
     };
@@ -74,7 +74,7 @@ describe("precompact.mjs — snapshot-built event (D2 PRD Phase 6.1)", () => {
     try { rmSync(fakeProject, { recursive: true, force: true }); } catch {}
   });
 
-  test("emits snapshot-built event with bytes_avoided > 0", () => {
+  test("persists a snapshot, compact count and compaction summary", () => {
     // Pre-seed the SessionDB at the path precompact.mjs would resolve.
     // Use the same hash scheme as session-helpers.mjs:getSessionDBPath.
     const { createHash } = require("node:crypto") as typeof import("node:crypto");
@@ -82,7 +82,7 @@ describe("precompact.mjs — snapshot-built event (D2 PRD Phase 6.1)", () => {
     // must apply the same normalization before SHA — otherwise on Windows the
     // expected hash uses backslashes while the hook uses slashes (#435 pattern).
     const projectHash = _hashCanonical(fakeProject.replace(/\\/g, "/"));
-    const dbDir = join(fakeHome, ".claude", "context-mode", "sessions");
+    const dbDir = join(fakeHome, ".codex", "context-mode", "sessions");
     require("node:fs").mkdirSync(dbDir, { recursive: true });
     const dbPath = join(dbDir, `${projectHash}.db`);
 
@@ -116,12 +116,20 @@ describe("precompact.mjs — snapshot-built event (D2 PRD Phase 6.1)", () => {
     assert.equal(result.status, 0, `precompact exit non-zero. stderr: ${result.stderr}`);
     assert.ok(existsSync(dbPath), "session DB must exist after precompact");
 
-    const rows = readEvents(dbPath, sessionId, "snapshot-built");
+    const rows = readEvents(dbPath, sessionId, "compaction_summary");
     expect(rows.length).toBeGreaterThanOrEqual(1);
     const row = rows[0];
     expect(row.category).toBe("compaction");
-    expect(row.type).toBe("snapshot-built");
-    expect(row.bytes_avoided).toBeGreaterThan(0);
+    expect(row.type).toBe("compaction_summary");
+    expect(row.data).toContain("5 events, 5 files touched");
+    const db = new SessionDB({ dbPath });
+    try {
+      const resume = db.getResume(sessionId);
+      expect(resume?.consumed).toBe(0);
+      expect(resume?.event_count).toBe(5);
+      expect(resume?.snapshot).toContain("file-0.ts");
+      expect(db.getSessionStats(sessionId)?.compact_count).toBe(1);
+    } finally { db.close(); }
     expect(row.bytes_returned).toBe(0);
   });
 });

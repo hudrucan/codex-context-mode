@@ -97,7 +97,7 @@ export function createExternalMcpGuidance(t) {
 
 // ── Backward compat: static exports defaulting to claude-code ──
 
-const _t = createToolNamer("claude-code");
+const _t = createToolNamer("codex");
 export const ROUTING_BLOCK = createRoutingBlock(_t);
 export const READ_GUIDANCE = createReadGuidance(_t);
 export const GREP_GUIDANCE = createGrepGuidance(_t);

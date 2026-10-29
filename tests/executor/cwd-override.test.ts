@@ -26,7 +26,7 @@ const PRINT_CWD = `node -p "process.cwd()"`;
 // On case-insensitive filesystems (Windows, default macOS) compare
 // case-insensitively — `mkdtempSync` may differ in case from realpath.
 const normalize = (p: string) => {
-  const real = realpathSync(p);
+  const real = realpathSync.native(p);
   return process.platform === "win32" || process.platform === "darwin"
     ? real.toLowerCase()
     : real;

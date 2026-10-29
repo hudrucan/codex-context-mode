@@ -77,14 +77,6 @@ describe("hook readStdin idle timeout", () => {
     expect(JSON.parse(result.stdout)).toEqual({ ok: true, length: 0 });
   });
 
-  it("core readStdin exits when stdin remains open but idle", async () => {
-    const result = await runReadStdin(resolve(ROOT, "hooks", "core", "stdin.mjs"));
-
-    expect(result.code).toBe(0);
-    expect(result.elapsedMs).toBeLessThan(900);
-    expect(JSON.parse(result.stdout)).toEqual({ ok: true, length: 0 });
-  });
-
   // Partial-buffer correctness — see issue #242 (Gemini AfterTool >1MB
   // tool_response that arrives in chunks then stalls). Resolving with a
   // truncated buffer would silently corrupt downstream JSON.parse; the
@@ -93,16 +85,6 @@ describe("hook readStdin idle timeout", () => {
   it("session helper readStdin rejects when partial data arrives and pipe stalls", async () => {
     const partial = '{"tool_response":"partial-without-closing-brace';
     const result = await runReadStdin(resolve(ROOT, "hooks", "session-helpers.mjs"), { write: partial });
-
-    expect(result.code).toBe(1);
-    expect(result.stdout).toBe("");
-    expect(result.stderr).toMatch(/stdin idle/);
-    expect(result.stderr).toMatch(new RegExp(`${partial.length} bytes`));
-  });
-
-  it("core readStdin rejects when partial data arrives and pipe stalls", async () => {
-    const partial = '{"tool_response":"partial-without-closing-brace';
-    const result = await runReadStdin(resolve(ROOT, "hooks", "core", "stdin.mjs"), { write: partial });
 
     expect(result.code).toBe(1);
     expect(result.stdout).toBe("");

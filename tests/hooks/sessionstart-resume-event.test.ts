@@ -24,7 +24,7 @@ const _hashCanonical = (p: string) => createHash("sha256").update(
 ).digest("hex").slice(0, 16);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SESSIONSTART_PATH = join(__dirname, "..", "..", "hooks", "sessionstart.mjs");
+const SESSIONSTART_PATH = join(__dirname, "..", "..", "hooks", "codex", "sessionstart.mjs");
 
 interface RawEventRow {
   type: string;
@@ -62,8 +62,8 @@ describe("sessionstart.mjs — snapshot-consumed event (D2 PRD Phase 6.2)", () =
     env = {
       HOME: fakeHome,
       USERPROFILE: fakeHome,
-      CLAUDE_CONFIG_DIR: join(fakeHome, ".claude"),
-      CLAUDE_PROJECT_DIR: fakeProject,
+      CODEX_HOME: join(fakeHome, ".codex"),
+      CONTEXT_MODE_PROJECT_DIR: fakeProject,
       CLAUDE_SESSION_ID: sessionId,
       CONTEXT_MODE_SESSION_SUFFIX: "",
     };
@@ -79,7 +79,7 @@ describe("sessionstart.mjs — snapshot-consumed event (D2 PRD Phase 6.2)", () =
     // must apply the same normalization before SHA — otherwise on Windows the
     // expected hash uses backslashes while the hook uses slashes (#435 pattern).
     const projectHash = _hashCanonical(fakeProject.replace(/\\/g, "/"));
-    const dbDir = join(fakeHome, ".claude", "context-mode", "sessions");
+    const dbDir = join(fakeHome, ".codex", "context-mode", "sessions");
     mkdirSync(dbDir, { recursive: true });
     const dbPath = join(dbDir, `${projectHash}.db`);
 
@@ -109,12 +109,15 @@ describe("sessionstart.mjs — snapshot-consumed event (D2 PRD Phase 6.2)", () =
     assert.equal(result.status, 0, `sessionstart exit non-zero. stderr: ${result.stderr}`);
     assert.ok(existsSync(dbPath), "session DB must exist after sessionstart");
 
-    const rows = readEvents(dbPath, sessionId, "snapshot-consumed");
-    expect(rows.length).toBeGreaterThanOrEqual(1);
-    const row = rows[0];
-    expect(row.category).toBe("session-resume");
-    expect(row.type).toBe("snapshot-consumed");
-    expect(row.bytes_returned).toBe(SNAPSHOT_BODY.length);
-    expect(row.bytes_avoided).toBe(0);
+    const context = JSON.parse(result.stdout).hookSpecificOutput.additionalContext;
+    expect(context).toContain(SNAPSHOT_BODY);
+    const db = new SessionDB({ dbPath });
+    try { expect(db.getResume(sessionId)?.consumed).toBe(1); } finally { db.close(); }
+    const again = spawnSync(process.execPath, [SESSIONSTART_PATH], {
+      input: JSON.stringify({ session_id: sessionId, source: "compact", cwd: fakeProject }),
+      encoding: "utf8", env: { ...process.env, ...env }, timeout: 30_000,
+    });
+    expect(again.status).toBe(0);
+    expect(JSON.parse(again.stdout).hookSpecificOutput.additionalContext).not.toContain(SNAPSHOT_BODY);
   });
 });

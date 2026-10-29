@@ -62,7 +62,7 @@ function browserOpenArgv(
 
 // ── Adapter imports ──────────────────────────────────────
 import { CodexAdapter } from "./adapters/codex/index.js";
-import type { DetectionSignal, HookAdapter } from "./adapters/types.js";
+import type { HookAdapter } from "./adapters/types.js";
 
 
 /* -------------------------------------------------------
@@ -541,15 +541,10 @@ function logStorageDir(dir: ResolvedStorageDir): number {
 async function doctor(): Promise<number> {
   if (process.stdout.isTTY) console.clear();
 
-  // Detect platform
-  const detection: DetectionSignal = { platform: "codex", confidence: "high", reason: "Codex-only runtime" };
   const adapter: HookAdapter = new CodexAdapter();
 
   p.intro(color.bgMagenta(color.white(" context-mode doctor ")));
-  p.log.info(
-    `Platform: ${color.cyan(adapter.name)}` +
-      color.dim(` (${detection.confidence} confidence — ${detection.reason})`),
-  );
+  p.log.info("Platform: " + color.cyan(adapter.name));
 
   let criticalFails = 0;
 

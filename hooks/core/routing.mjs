@@ -641,17 +641,6 @@ function getWebFetchUrl(toolInput) {
   return "";
 }
 
-function getCodexConfigDir(env = process.env) {
-  const codexHome = env.CODEX_HOME;
-  if (codexHome && codexHome.trim() !== "") return resolve(codexHome);
-  return resolve(homedir(), ".codex");
-}
-
-function getPlatformSettingsPath(platform) {
-  if (platform === "codex") return resolve(getCodexConfigDir(), "settings.json");
-  return undefined;
-}
-
 /**
  * Route a PreToolUse event. Returns normalized decision object or null for passthrough.
  *
@@ -688,7 +677,7 @@ export function routePreToolUse(toolName, toolInput, projectDir, platform, sessi
   }
 
   // Build platform-specific tool namer (defaults to claude-code for backward compat)
-  const t = createToolNamer(platform || "claude-code");
+  const t = createToolNamer("codex");
 
   // Build platform-specific guidance/routing content
   const routingBlock = platform ? createRoutingBlock(t) : ROUTING_BLOCK;
@@ -698,7 +687,7 @@ export function routePreToolUse(toolName, toolInput, projectDir, platform, sessi
 
   // Normalize platform-specific tool name to canonical
   const canonical = TOOL_ALIASES[toolName] ?? toolName;
-  const platformSettingsPath = getPlatformSettingsPath(platform);
+  const platformSettingsPath = undefined;
 
   // ─── Bash: Stage 1 security check, then Stage 2 routing ───
   if (canonical === "Bash") {
@@ -897,14 +886,9 @@ export function routePreToolUse(toolName, toolInput, projectDir, platform, sessi
     const fieldName = ["prompt", "request", "objective", "question", "query", "task"].find(f => f in toolInput) ?? "prompt";
     const prompt = toolInput[fieldName] ?? "";
 
-    // Claude Code surfaces ctx_* as DEFERRED tools (schemas loaded via ToolSearch).
-    // Without a bootstrap step the subagent is told to use ctx_* tools it cannot yet
-    // invoke and stalls (see #724). Prepend the ToolSearch bootstrap for claude-code
-    // (the default when platform is unset). Other platforms don't defer, so skip it.
-    const isClaudeCode = !platform || platform === "claude-code";
     const subagentBlock = createRoutingBlock(t, {
       includeCommands: false,
-      toolSearchBootstrap: isClaudeCode,
+      toolSearchBootstrap: false,
     });
 
     const updatedInput =
@@ -917,11 +901,6 @@ export function routePreToolUse(toolName, toolInput, projectDir, platform, sessi
 
   // ─── MCP execute: security check for shell commands ───
   // Match bare, generic MCP, and legacy context-mode execute tool names.
-  const shouldPinClaudeExecutorCwd =
-    platform === "claude-code" &&
-    typeof projectDir === "string" &&
-    projectDir.length > 0;
-
   if (matchesContextModeTool(toolName, "ctx_execute", "execute")) {
     if (security && toolInput.language === "shell") {
       const code = toolInput.code ?? "";
@@ -935,9 +914,6 @@ export function routePreToolUse(toolName, toolInput, projectDir, platform, sessi
           return { action: "ask" };
         }
       }
-    }
-    if (toolInput.language === "shell" && shouldPinClaudeExecutorCwd && typeof toolInput.cwd !== "string") {
-      return { action: "modify", updatedInput: { ...toolInput, cwd: projectDir } };
     }
     return null;
   }
@@ -989,9 +965,6 @@ export function routePreToolUse(toolName, toolInput, projectDir, platform, sessi
           }
         }
       }
-    }
-    if (shouldPinClaudeExecutorCwd && typeof toolInput.cwd !== "string") {
-      return { action: "modify", updatedInput: { ...toolInput, cwd: projectDir } };
     }
     return null;
   }

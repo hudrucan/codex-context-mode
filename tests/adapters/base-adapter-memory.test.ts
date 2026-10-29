@@ -38,7 +38,7 @@ describe("BaseAdapter memory/config defaults", () => {
 
   it("getInstructionFiles defaults to ['CLAUDE.md']", () => {
     const adapter = new TestAdapter([".claude"]);
-    expect(adapter.getInstructionFiles()).toEqual(["CLAUDE.md"]);
+    expect(adapter.getInstructionFiles()).toEqual(["AGENTS.md", "AGENTS.override.md"]);
   });
 
   it("getMemoryDir defaults to <configDir>/memory", () => {

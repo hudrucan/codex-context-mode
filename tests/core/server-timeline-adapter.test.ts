@@ -33,7 +33,7 @@ describe("ctx_search timeline mode wiring (server.ts)", () => {
 
   it("derives configDir from _detectedAdapter.getConfigDir() (not hardcoded ~/.claude)", () => {
     expect(SERVER_SRC).toMatch(
-      /_detectedAdapter\??\.getConfigDir\(\)/,
+      /resolveCodexConfigDir\(\)/,
     );
   });
 

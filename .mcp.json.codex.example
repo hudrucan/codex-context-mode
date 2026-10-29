@@ -1,12 +1,11 @@
 {
-  "_comment": "Codex CLI users — context-mode auto-recovers the project cwd from your active Codex session log (~/.codex/sessions/<uuid>.jsonl). If that heuristic fails (e.g. you launched MCP outside a Codex session), set CONTEXT_MODE_PROJECT_DIR explicitly to pin the workspace. Issue #45.",
+  "_comment": "Standalone Codex configuration. Replace the absolute start.mjs path. MCP requests use thread identity; CONTEXT_MODE_PROJECT_DIR can explicitly pin a workspace.",
   "mcpServers": {
     "context-mode": {
       "command": "node",
-      "args": ["${CODEX_PLUGIN_ROOT}/start.mjs"],
-      "env": {
-        "CONTEXT_MODE_PROJECT_DIR": "${workspaceFolder}"
-      }
+      "args": [
+        "/absolute/path/to/context-mode/start.mjs"
+      ]
     }
   }
 }

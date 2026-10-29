@@ -113,7 +113,7 @@ const LEGACY_HOOK_PATH_SUFFIXES: Record<keyof typeof CODEX_HOOK_COMMANDS, string
   SessionStart: ["hooks/sessionstart.mjs", "hooks/codex/sessionstart.mjs"],
   PreCompact: ["hooks/precompact.mjs", "hooks/codex/precompact.mjs"],
   UserPromptSubmit: ["hooks/userpromptsubmit.mjs", "hooks/codex/userpromptsubmit.mjs"],
-  Stop: ["hooks/stop.mjs", "hooks/codex/stop.mjs"],
+  Stop: ["hooks/codex/stop.mjs"],
 };
 
 type CodexVersionRunner = (

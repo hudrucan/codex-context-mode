@@ -113,11 +113,17 @@ export function derivePluginManifest({ pkg, pluginRoot }) {
 const LEGACY_FALLBACK = Object.freeze([
   "server.bundle.mjs",
   "cli.bundle.mjs",
-  join("hooks", "pretooluse.mjs"),
-  join("hooks", "posttooluse.mjs"),
-  join("hooks", "precompact.mjs"),
-  join("hooks", "sessionstart.mjs"),
-  join("hooks", "userpromptsubmit.mjs"),
+  join("hooks", "codex", "pretooluse.mjs"),
+  join("hooks", "codex", "posttooluse.mjs"),
+  join("hooks", "codex", "precompact.mjs"),
+  join("hooks", "codex", "sessionstart.mjs"),
+  join("hooks", "codex", "userpromptsubmit.mjs"),
+  join("hooks", "codex", "stop.mjs"),
+  join("hooks", "codex", "platform.mjs"),
+  join("hooks", "session-helpers.mjs"),
+  join("hooks", "session-loaders.mjs"),
+  join("hooks", "core", "routing.mjs"),
+  join("hooks", "core", "formatters.mjs"),
 ]);
 
 /**

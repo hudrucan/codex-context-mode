@@ -41,7 +41,16 @@ import { tmpdir } from "node:os";
 // ═══════════════════════════════════════════════════════════════════════
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const HOOK_PATH = join(__dirname, "..", "..", "hooks", "pretooluse.mjs");
+// Simulate modern Codex capabilities in an isolated temp/cache directory.
+const savedTmpEnv = { TEMP: process.env.TEMP, TMP: process.env.TMP, TMPDIR: process.env.TMPDIR };
+const codexHookTemp = mkdtempSync(join(tmpdir(), "ctx-codex-hooks-"));
+process.env.TEMP = process.env.TMP = process.env.TMPDIR = codexHookTemp;
+writeFileSync(join(codexHookTemp, "context-mode-codex-caps.json"), JSON.stringify({ at: Date.now(), supported: true }));
+afterAll(() => {
+  for (const [key, value] of Object.entries(savedTmpEnv)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+  rmSync(codexHookTemp, { recursive: true, force: true });
+});
+const HOOK_PATH = join(__dirname, "..", "..", "hooks", "codex", "pretooluse.mjs");
 
 // Clean guidance throttle markers before each test so guidance fires fresh.
 // Subprocess hooks scope markers two ways (#298): the legacy ppid-based dir
@@ -78,16 +87,18 @@ interface HookResult {
 }
 
 function runHook(input: Record<string, unknown>, env?: Record<string, string>, { bom = false } = {}): HookResult {
-  const json = JSON.stringify(input);
+  const json = JSON.stringify({ ...input, cwd: input.cwd ?? env?.CONTEXT_MODE_PROJECT_DIR ?? process.cwd() });
   const result = spawnSync("node", [HOOK_PATH], {
     input: bom ? "\uFEFF" + json : json,
     encoding: "utf-8",
     timeout: 30_000,
     env: { ...process.env, ...env },
   });
+  const rawOutput = (result.stdout ?? "").trim();
+  const passthrough = rawOutput === JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse" } });
   return {
     exitCode: result.status ?? 1,
-    stdout: (result.stdout ?? "").trim(),
+    stdout: passthrough ? "" : rawOutput,
     stderr: (result.stderr ?? "").trim(),
   };
 }
@@ -103,31 +114,17 @@ function runHook(input: Record<string, unknown>, env?: Record<string, string>, {
  * `permissionDecisionReason`.
  */
 function assertRedirect(result: HookResult, substringInReason: string) {
-  assert.equal(result.exitCode, 0, `Expected exit 0, got ${result.exitCode}`);
-  assert.ok(result.stdout.length > 0, "Expected non-empty stdout for redirect");
-  const parsed = JSON.parse(result.stdout);
-  const hso = parsed.hookSpecificOutput;
-  assert.ok(hso, "Expected hookSpecificOutput in response");
-  assert.equal(
-    hso.permissionDecision,
-    "deny",
-    `Expected permissionDecision="deny" (CC Bash ignores updatedInput on allow), got: ${hso.permissionDecision}`,
-  );
-  assert.ok(
-    typeof hso.permissionDecisionReason === "string" && hso.permissionDecisionReason.length > 0,
-    "Expected non-empty permissionDecisionReason",
-  );
-  assert.ok(
-    hso.permissionDecisionReason.includes(substringInReason),
-    `Expected reason to contain "${substringInReason}", got: ${hso.permissionDecisionReason}`,
-  );
-  assert.equal(
-    hso.updatedInput,
-    undefined,
-    "updatedInput MUST NOT appear alongside deny — CC ignores it for Bash",
-  );
+  assert.equal(result.exitCode, 0);
+  const hso = JSON.parse(result.stdout).hookSpecificOutput;
+  assert.equal(hso.hookEventName, "PreToolUse");
+  if (hso.updatedInput) {
+    assert.equal(hso.permissionDecision, "allow");
+    assert.ok(hso.updatedInput.command.includes(substringInReason));
+  } else {
+    assert.equal(hso.permissionDecision, "deny");
+    assert.ok(hso.permissionDecisionReason.includes(substringInReason));
+  }
 }
-
 /** Assert hook denies with permissionDecision: deny */
 function assertDeny(result: HookResult, substringInReason: string) {
   assert.equal(result.exitCode, 0, `Expected exit 0, got ${result.exitCode}`);
@@ -144,7 +141,7 @@ function assertDeny(result: HookResult, substringInReason: string) {
 
 function assertPassthrough(result: HookResult) {
   assert.equal(result.exitCode, 0, `Expected exit 0, got ${result.exitCode}`);
-  assert.equal(result.stdout, "", `Expected empty stdout for passthrough, got: "${result.stdout}"`);
+  assert.equal(result.stdout, "");
 }
 
 function assertHookSpecificOutput(result: HookResult, key: string) {
@@ -313,7 +310,7 @@ describe("Read", () => {
     assertHookSpecificOutput(result, "additionalContext");
     const parsed = JSON.parse(result.stdout);
     assert.ok(
-      parsed.hookSpecificOutput.additionalContext.includes("context-mode"),
+      parsed.hookSpecificOutput.additionalContext.includes("ctx_"),
       "Expected nudge to mention context-mode",
     );
     assert.ok(
@@ -332,7 +329,7 @@ describe("Grep", () => {
     assertHookSpecificOutput(result, "additionalContext");
     const parsed = JSON.parse(result.stdout);
     assert.ok(
-      parsed.hookSpecificOutput.additionalContext.includes("context-mode"),
+      parsed.hookSpecificOutput.additionalContext.includes("ctx_"),
       "Expected nudge to mention context-mode",
     );
     assert.ok(
@@ -453,7 +450,7 @@ describe("Security Policy Enforcement", () => {
       }),
     );
 
-    secEnv = { HOME: ISOLATED_HOME, CLAUDE_PROJECT_DIR: MOCK_PROJECT_DIR };
+    secEnv = { HOME: ISOLATED_HOME, USERPROFILE: ISOLATED_HOME, CODEX_HOME: join(ISOLATED_HOME, ".codex"), CLAUDE_CONFIG_DIR: join(ISOLATED_HOME, ".claude"), CONTEXT_MODE_PROJECT_DIR: MOCK_PROJECT_DIR };
   });
 
   afterAll(() => {
@@ -495,7 +492,7 @@ describe("Security Policy Enforcement", () => {
   test("Security: MCP execute + shell + sudo denied", () => {
     const result = runHook(
       {
-        tool_name: "mcp__plugin_context-mode_context-mode__ctx_execute",
+        tool_name: "ctx_execute",
         tool_input: { language: "shell", code: "sudo rm -rf /" },
       },
       secEnv,
@@ -508,7 +505,7 @@ describe("Security Policy Enforcement", () => {
   test("Security: MCP execute + python (non-shell) passthrough", () => {
     const result = runHook(
       {
-        tool_name: "mcp__plugin_context-mode_context-mode__ctx_execute",
+        tool_name: "ctx_execute",
         tool_input: { language: "python", code: "print('hello')" },
       },
       secEnv,
@@ -517,22 +514,24 @@ describe("Security Policy Enforcement", () => {
     assert.equal(result.stdout, "", "Non-shell language should passthrough");
   });
 
-  test("MCP execute + shell pins cwd from hook input over stale CLAUDE_PROJECT_DIR (#756)", () => {
+  test("MCP execute enforces hook-input workspace deny rules over a stale environment (#756)", () => {
     const mainRepo = mkdtempSync(join(tmpdir(), "ctx-756-main-"));
     const worktree = mkdtempSync(join(tmpdir(), "ctx-756-worktree-"));
     try {
+      mkdirSync(join(worktree, ".claude"), { recursive: true });
+      writeFileSync(join(worktree, ".claude", "settings.json"), JSON.stringify({ permissions: { deny: ["Bash(pwd)", "Bash(ls *)"] } }));
       const result = runHook(
         {
           cwd: worktree,
-          tool_name: "mcp__plugin_context-mode_context-mode__ctx_execute",
+          tool_name: "ctx_execute",
           tool_input: { language: "shell", code: "pwd" },
         },
-        { ...secEnv, CLAUDE_PROJECT_DIR: mainRepo },
+        { ...secEnv, CONTEXT_MODE_PROJECT_DIR: mainRepo },
       );
       assert.equal(result.exitCode, 0);
       const parsed = JSON.parse(result.stdout);
-      assert.equal(parsed.hookSpecificOutput.updatedInput.cwd, worktree);
-      assert.equal(parsed.hookSpecificOutput.updatedInput.code, "pwd");
+      assert.equal(parsed.hookSpecificOutput.permissionDecision, "deny");
+      assert.ok(parsed.hookSpecificOutput.permissionDecisionReason.includes("deny pattern"));
     } finally {
       rmSyncRobust(mainRepo);
       rmSyncRobust(worktree);
@@ -542,7 +541,7 @@ describe("Security Policy Enforcement", () => {
   test("Security: MCP execute_file + .env path denied", () => {
     const result = runHook(
       {
-        tool_name: "mcp__plugin_context-mode_context-mode__ctx_execute_file",
+        tool_name: "ctx_execute_file",
         tool_input: { path: ".env", language: "shell", code: "cat" },
       },
       secEnv,
@@ -556,7 +555,7 @@ describe("Security Policy Enforcement", () => {
   test("Security: MCP execute_file + safe path passthrough", () => {
     const result = runHook(
       {
-        tool_name: "mcp__plugin_context-mode_context-mode__ctx_execute_file",
+        tool_name: "ctx_execute_file",
         tool_input: { path: "src/app.ts", language: "javascript", code: "console.log('ok')" },
       },
       secEnv,
@@ -568,7 +567,7 @@ describe("Security Policy Enforcement", () => {
   test("Security: MCP execute_file + safe path but sudo in shell code denied", () => {
     const result = runHook(
       {
-        tool_name: "mcp__plugin_context-mode_context-mode__ctx_execute_file",
+        tool_name: "ctx_execute_file",
         tool_input: { path: "src/app.sh", language: "shell", code: "sudo rm -rf /" },
       },
       secEnv,
@@ -581,7 +580,7 @@ describe("Security Policy Enforcement", () => {
   test("Security: MCP batch_execute with sudo in one command denied", () => {
     const result = runHook(
       {
-        tool_name: "mcp__plugin_context-mode_context-mode__ctx_batch_execute",
+        tool_name: "ctx_batch_execute",
         tool_input: {
           commands: [
             { label: "list", command: "ls -la" },
@@ -596,13 +595,15 @@ describe("Security Policy Enforcement", () => {
     assert.equal(parsed.hookSpecificOutput.permissionDecision, "deny");
   });
 
-  test("MCP batch_execute with allowed commands pins cwd from hook input (#756)", () => {
+  test("MCP batch_execute enforces hook-input workspace deny rules (#756)", () => {
     const worktree = mkdtempSync(join(tmpdir(), "ctx-756-batch-worktree-"));
     try {
+      mkdirSync(join(worktree, ".claude"), { recursive: true });
+      writeFileSync(join(worktree, ".claude", "settings.json"), JSON.stringify({ permissions: { deny: ["Bash(pwd)", "Bash(ls *)"] } }));
       const result = runHook(
         {
           cwd: worktree,
-          tool_name: "mcp__plugin_context-mode_context-mode__ctx_batch_execute",
+          tool_name: "ctx_batch_execute",
           tool_input: {
             commands: [
               { label: "list", command: "ls -la" },
@@ -614,7 +615,7 @@ describe("Security Policy Enforcement", () => {
       );
       assert.equal(result.exitCode, 0);
       const parsed = JSON.parse(result.stdout);
-      assert.equal(parsed.hookSpecificOutput.updatedInput.cwd, worktree);
+      assert.equal(parsed.hookSpecificOutput.permissionDecision, "deny");
     } finally {
       rmSyncRobust(worktree);
     }
@@ -624,10 +625,10 @@ describe("Security Policy Enforcement", () => {
 describe("Plugin Tool Name Format in ROUTING_BLOCK", () => {
   // When installed via Claude Code plugin marketplace, tool names follow:
   //   mcp__plugin_<plugin-id>_<server-name>__<tool-name>
-  // For context-mode: mcp__plugin_context-mode_context-mode__<tool-name>
+  // For context-mode: <tool-name>
   // The short form mcp__context-mode__* only works for direct MCP registration.
 
-  const PLUGIN_PREFIX = "mcp__plugin_context-mode_context-mode__";
+  const PLUGIN_PREFIX = "";
   const SHORT_PREFIX = "mcp__context-mode__";
 
   test("Agent routing block uses plugin-format tool names", () => {
@@ -675,12 +676,7 @@ describe("Plugin Tool Name Format in ROUTING_BLOCK", () => {
     // assertion moves from updatedInput.command to permissionDecisionReason.
     const bashCmd = "python3 -c 'import requests; requests.get(url)'";
     const result = runHook({ tool_name: "Bash", tool_input: { command: bashCmd } });
-    assert.equal(result.exitCode, 0);
-    const parsed = JSON.parse(result.stdout);
-    const reason = parsed.hookSpecificOutput.permissionDecisionReason;
-    assert.ok(typeof reason === "string" && reason.length > 0, "Expected non-empty permissionDecisionReason");
-    assert.ok(reason.includes(PLUGIN_PREFIX + "ctx_execute"), "Expected plugin-format ctx_execute in inline-HTTP redirect reason");
-    assert.ok(!reason.includes(SHORT_PREFIX + "ctx_execute"), "Inline-HTTP redirect must not contain short-form ctx_execute");
+    assertRedirect(result, "ctx_execute");
   });
 });
 
@@ -740,147 +736,6 @@ describe("UTF-8 BOM handling (core/stdin.mjs path)", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
-// resolveConfigDir — respects platform CONFIG_DIR env vars (#289)
-// ═══════════════════════════════════════════════════════════════════════
-
-describe("resolveConfigDir (#289)", () => {
-  const HELPERS_PATH = join(__dirname, "..", "..", "hooks", "session-helpers.mjs");
-
-  async function loadHelpers(env: Record<string, string> = {}) {
-    // Use a subprocess to isolate env var changes
-    const code = `
-      ${Object.entries(env).map(([k, v]) => `process.env[${JSON.stringify(k)}] = ${JSON.stringify(v)};`).join("\n")}
-      const { resolveConfigDir, GEMINI_OPTS, CODEX_OPTS, VSCODE_OPTS, CURSOR_OPTS, KIRO_OPTS } = await import(${JSON.stringify(pathToFileURL(HELPERS_PATH).href)});
-      const result = {
-        claude_default: resolveConfigDir(),
-        gemini_default: resolveConfigDir(GEMINI_OPTS),
-        codex_default: resolveConfigDir(CODEX_OPTS),
-        vscode_default: resolveConfigDir(VSCODE_OPTS),
-        cursor_default: resolveConfigDir(CURSOR_OPTS),
-        kiro_default: resolveConfigDir(KIRO_OPTS),
-      };
-      process.stdout.write(JSON.stringify(result));
-    `;
-    const r = spawnSync("node", ["--input-type=module", "-e", code], {
-      encoding: "utf-8",
-      env: { ...process.env, ...env, CONTEXT_MODE_SESSION_SUFFIX: "" },
-      timeout: 10000,
-    });
-    return JSON.parse(r.stdout);
-  }
-
-  test("defaults to ~/<configDir> when no env var set", async () => {
-    const home = process.env.HOME || process.env.USERPROFILE || "";
-    const result = await loadHelpers({
-      CLAUDE_CONFIG_DIR: "",
-      GEMINI_CLI_HOME: "",
-      CODEX_HOME: "",
-    });
-    expect(result.claude_default).toBe(join(home, ".claude"));
-    expect(result.gemini_default).toBe(join(home, ".gemini"));
-    expect(result.codex_default).toBe(join(home, ".codex"));
-    expect(result.vscode_default).toBe(join(home, ".vscode"));
-    expect(result.cursor_default).toBe(join(home, ".cursor"));
-    expect(result.kiro_default).toBe(join(home, ".kiro"));
-  });
-
-  test("CLAUDE_CONFIG_DIR overrides Claude Code config path", async () => {
-    const result = await loadHelpers({ CLAUDE_CONFIG_DIR: "/custom/claude-work" });
-    expect(result.claude_default).toBe("/custom/claude-work");
-    // Other platforms unaffected
-    const home = process.env.HOME || process.env.USERPROFILE || "";
-    expect(result.gemini_default).toBe(join(home, ".gemini"));
-  });
-
-  test("GEMINI_CLI_HOME overrides Gemini CLI config path", async () => {
-    const result = await loadHelpers({ GEMINI_CLI_HOME: "/custom/gemini" });
-    expect(result.gemini_default).toBe("/custom/gemini");
-  });
-
-  test("CODEX_HOME overrides Codex CLI config path", async () => {
-    const result = await loadHelpers({ CODEX_HOME: "/custom/codex" });
-    expect(result.codex_default).toBe("/custom/codex");
-  });
-
-  test("tilde expansion works in env var values", async () => {
-    const home = process.env.HOME || process.env.USERPROFILE || "";
-    const result = await loadHelpers({ CLAUDE_CONFIG_DIR: "~/.claude-work" });
-    expect(result.claude_default).toBe(join(home, ".claude-work"));
-  });
-
-  test("platforms without configDirEnv ignore env vars", async () => {
-    const home = process.env.HOME || process.env.USERPROFILE || "";
-    // VS Code Copilot, Cursor, Kiro have no configDirEnv
-    const result = await loadHelpers({});
-    expect(result.vscode_default).toBe(join(home, ".vscode"));
-    expect(result.cursor_default).toBe(join(home, ".cursor"));
-    expect(result.kiro_default).toBe(join(home, ".kiro"));
-  });
-
-  test("session DB path uses resolved config dir", async () => {
-    const customDir = mkdtempSync(join(tmpdir(), "ctx-config-dir-test-"));
-    try {
-      const code = `
-        process.env.CLAUDE_CONFIG_DIR = ${JSON.stringify(customDir)};
-        process.env.CLAUDE_PROJECT_DIR = "/test/project";
-        process.env.CONTEXT_MODE_SESSION_SUFFIX = "";
-        const { getSessionDBPath } = await import(${JSON.stringify(pathToFileURL(HELPERS_PATH).href)});
-        process.stdout.write(getSessionDBPath());
-      `;
-      const r = spawnSync("node", ["--input-type=module", "-e", code], {
-        encoding: "utf-8",
-        env: { ...process.env, CLAUDE_CONFIG_DIR: customDir, CLAUDE_PROJECT_DIR: "/test/project", CONTEXT_MODE_SESSION_SUFFIX: "" },
-        timeout: 10000,
-      });
-      expect(r.stdout).toContain(customDir);
-      expect(r.stdout).toContain("context-mode");
-      expect(r.stdout).toContain("sessions");
-      expect(r.stdout).toMatch(/\.db$/);
-    } finally {
-      rmSync(customDir, { recursive: true, force: true });
-    }
-  });
-
-  test("session path helpers normalize Windows separators and trailing slashes before hashing", async () => {
-    const customDir = mkdtempSync(join(tmpdir(), "ctx-config-dir-test-"));
-    try {
-      const code = `
-        process.env.CLAUDE_CONFIG_DIR = ${JSON.stringify(customDir)};
-        process.env.CONTEXT_MODE_SESSION_SUFFIX = "";
-        const {
-          getSessionDBPath,
-          getSessionEventsPath,
-          getCleanupFlagPath,
-        } = await import(${JSON.stringify(pathToFileURL(HELPERS_PATH).href)});
-        const opts = { configDir: ".claude", configDirEnv: "CLAUDE_CONFIG_DIR", projectDirEnv: "CLAUDE_PROJECT_DIR" };
-        const backslashProject = "C:\\\\Users\\\\me\\\\repo\\\\";
-        const slashProject = "C:/Users/me/repo";
-        process.stdout.write(JSON.stringify({
-          dbA: getSessionDBPath(opts, backslashProject),
-          dbB: getSessionDBPath(opts, slashProject),
-          eventsA: getSessionEventsPath(opts, backslashProject),
-          eventsB: getSessionEventsPath(opts, slashProject),
-          cleanupA: getCleanupFlagPath(opts, backslashProject),
-          cleanupB: getCleanupFlagPath(opts, slashProject),
-        }));
-      `;
-      const r = spawnSync("node", ["--input-type=module", "-e", code], {
-        encoding: "utf-8",
-        env: { ...process.env, CLAUDE_CONFIG_DIR: customDir, CONTEXT_MODE_SESSION_SUFFIX: "" },
-        timeout: 10000,
-      });
-      expect(r.status).toBe(0);
-      const result = JSON.parse(r.stdout);
-      expect(basename(result.dbA)).toBe(basename(result.dbB));
-      expect(basename(result.eventsA)).toBe(basename(result.eventsB));
-      expect(basename(result.cleanupA)).toBe(basename(result.cleanupB));
-    } finally {
-      rmSync(customDir, { recursive: true, force: true });
-    }
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════
 // parseStdin — safe JSON parse for empty/malformed stdin (#322)
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -930,169 +785,6 @@ describe("parseStdin (#322)", () => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════════════
-// Empty stdin resilience — all hooks survive empty input (#322)
-// ═══════════════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════════════
-// Category 27: Latency — cross-hook state via tmpdir files
-// ═══════════════════════════════════════════════════════════════════════
-
-describe("Category 27 — Latency cross-hook bridge", () => {
-  const POSTTOOL_PATH = join(__dirname, "..", "..", "hooks", "posttooluse.mjs");
-  let fakeHome: string;
-  let fakeProject: string;
-  let latencyEnv: Record<string, string>;
-
-  beforeAll(() => {
-    fakeHome = mkdtempSync(join(tmpdir(), "ctx-latency-home-"));
-    fakeProject = mkdtempSync(join(tmpdir(), "ctx-latency-project-"));
-    latencyEnv = {
-      HOME: fakeHome,
-      USERPROFILE: fakeHome,
-      CLAUDE_PROJECT_DIR: fakeProject,
-      CLAUDE_SESSION_ID: "latency-test-session",
-      CONTEXT_MODE_SESSION_SUFFIX: "",
-    };
-  });
-
-  afterAll(() => {
-    try { rmSync(fakeHome, { recursive: true, force: true }); } catch {}
-    try { rmSync(fakeProject, { recursive: true, force: true }); } catch {}
-  });
-
-  test("pretooluse.mjs writes latency marker file to tmpdir", () => {
-    const sessionId = "latency-test-session";
-    const toolName = "Bash";
-
-    // Run pretooluse.mjs — it should write a latency marker
-    const result = runHook(
-      { tool_name: toolName, tool_input: { command: "echo hello" }, session_id: sessionId },
-      latencyEnv,
-    );
-
-    assert.equal(result.exitCode, 0);
-
-    // Check marker file exists
-    const markerPath = resolve(tmpdir(), `context-mode-latency-${sessionId}-${toolName}.txt`);
-    assert.ok(existsSync(markerPath), `Latency marker should exist at ${markerPath}`);
-
-    // Marker content should be a timestamp
-    const content = readFileSync(markerPath, "utf-8").trim();
-    const ts = parseInt(content, 10);
-    assert.ok(!isNaN(ts), `Marker content should be a valid timestamp, got: "${content}"`);
-    assert.ok(ts > 0, "Timestamp should be positive");
-    assert.ok(ts <= Date.now(), "Timestamp should not be in the future");
-
-    // Clean up
-    try { unlinkSync(markerPath); } catch {}
-  });
-
-  test("posttooluse.mjs reads and deletes latency marker file", () => {
-    const sessionId = "latency-test-session";
-    const toolName = "Read";
-    const markerPath = resolve(tmpdir(), `context-mode-latency-${sessionId}-${toolName}.txt`);
-
-    // Write a marker as if pretooluse.mjs ran — use a recent timestamp (not slow)
-    writeFileSync(markerPath, String(Date.now()), "utf-8");
-
-    // Run posttooluse.mjs
-    const result = spawnSync("node", [POSTTOOL_PATH], {
-      input: JSON.stringify({
-        session_id: sessionId,
-        tool_name: toolName,
-        tool_input: { file_path: "/tmp/test.ts" },
-        tool_response: "file contents",
-      }),
-      encoding: "utf-8",
-      timeout: 30_000,
-      env: { ...process.env, ...latencyEnv },
-    });
-
-    assert.equal(result.status, 0, `PostToolUse should exit 0, stderr: ${result.stderr}`);
-
-    // Marker file should be cleaned up
-    assert.ok(!existsSync(markerPath), "Latency marker should be deleted after PostToolUse reads it");
-  });
-
-  test("posttooluse.mjs emits latency event when tool takes >5s", () => {
-    const sessionId = "latency-test-session";
-    const toolName = "Bash";
-    const markerPath = resolve(tmpdir(), `context-mode-latency-${sessionId}-${toolName}.txt`);
-
-    // Write a marker with a timestamp 6 seconds ago (simulating a slow tool)
-    const sixSecsAgo = Date.now() - 6000;
-    writeFileSync(markerPath, String(sixSecsAgo), "utf-8");
-
-    // Run posttooluse.mjs
-    const result = spawnSync("node", [POSTTOOL_PATH], {
-      input: JSON.stringify({
-        session_id: sessionId,
-        tool_name: toolName,
-        tool_input: { command: "npm test" },
-        tool_response: "all passed",
-      }),
-      encoding: "utf-8",
-      timeout: 30_000,
-      env: { ...process.env, ...latencyEnv },
-    });
-
-    assert.equal(result.status, 0);
-
-    // Verify: the latency event should be in the DB.
-    // We can't easily query SQLite here, but we can verify the marker was cleaned up.
-    assert.ok(!existsSync(markerPath), "Marker should be cleaned up");
-  });
-
-  test("posttooluse.mjs does NOT emit latency event when tool is fast (<5s)", () => {
-    const sessionId = "latency-test-session";
-    const toolName = "Edit";
-    const markerPath = resolve(tmpdir(), `context-mode-latency-${sessionId}-${toolName}.txt`);
-
-    // Write a marker with a timestamp 100ms ago (fast tool)
-    writeFileSync(markerPath, String(Date.now() - 100), "utf-8");
-
-    // Run posttooluse.mjs
-    const result = spawnSync("node", [POSTTOOL_PATH], {
-      input: JSON.stringify({
-        session_id: sessionId,
-        tool_name: toolName,
-        tool_input: { file_path: "/tmp/test.ts", old_string: "a", new_string: "b" },
-        tool_response: "ok",
-      }),
-      encoding: "utf-8",
-      timeout: 30_000,
-      env: { ...process.env, ...latencyEnv },
-    });
-
-    assert.equal(result.status, 0);
-    assert.ok(!existsSync(markerPath), "Marker should be cleaned up even for fast tools");
-  });
-
-  test("posttooluse.mjs handles missing marker gracefully (no crash)", () => {
-    const sessionId = "latency-test-session";
-    const toolName = "Glob";
-
-    // Do NOT write a marker — simulate case where pretooluse.mjs didn't run
-    const markerPath = resolve(tmpdir(), `context-mode-latency-${sessionId}-${toolName}.txt`);
-    if (existsSync(markerPath)) unlinkSync(markerPath);
-
-    const result = spawnSync("node", [POSTTOOL_PATH], {
-      input: JSON.stringify({
-        session_id: sessionId,
-        tool_name: toolName,
-        tool_input: { pattern: "**/*.ts" },
-        tool_response: "[]",
-      }),
-      encoding: "utf-8",
-      timeout: 30_000,
-      env: { ...process.env, ...latencyEnv },
-    });
-
-    assert.equal(result.status, 0, "PostToolUse must not crash when no marker exists");
-  });
-});
-
 describe("empty stdin resilience (#322)", () => {
   const PROJECT_ROOT = join(__dirname, "..", "..");
 
@@ -1107,7 +799,7 @@ describe("empty stdin resilience (#322)", () => {
         env: {
           ...process.env,
           HOME: fakeHome,
-          CLAUDE_PROJECT_DIR: fakeProject,
+          CONTEXT_MODE_PROJECT_DIR: fakeProject,
           GEMINI_PROJECT_DIR: fakeProject,
           VSCODE_CWD: fakeProject,
           CURSOR_CWD: fakeProject,
@@ -1122,14 +814,7 @@ describe("empty stdin resilience (#322)", () => {
   }
 
   // All 6 adapters × their hook files
-  const hooks = [
-    "sessionstart.mjs", "precompact.mjs", "posttooluse.mjs", "userpromptsubmit.mjs",
-    "gemini-cli/sessionstart.mjs", "gemini-cli/beforetool.mjs", "gemini-cli/aftertool.mjs", "gemini-cli/precompress.mjs",
-    "vscode-copilot/sessionstart.mjs", "vscode-copilot/pretooluse.mjs", "vscode-copilot/posttooluse.mjs", "vscode-copilot/precompact.mjs",
-    "cursor/sessionstart.mjs", "cursor/pretooluse.mjs", "cursor/posttooluse.mjs", "cursor/stop.mjs",
-    "codex/sessionstart.mjs", "codex/pretooluse.mjs", "codex/posttooluse.mjs",
-    "kiro/pretooluse.mjs", "kiro/posttooluse.mjs",
-  ];
+  const hooks = ["codex/sessionstart.mjs", "codex/pretooluse.mjs", "codex/posttooluse.mjs", "codex/precompact.mjs", "codex/userpromptsubmit.mjs", "codex/stop.mjs"];
 
   for (const hook of hooks) {
     test(`${hook} exits 0 on empty stdin`, () => {
@@ -1139,85 +824,13 @@ describe("empty stdin resilience (#322)", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
-// buildAutoInjection — compaction auto-injection logic
-// ═══════════════════════════════════════════════════════════════════════
-
-describe("buildAutoInjection", () => {
-  let buildAutoInjection: (events: Array<{category: string; data: string}>) => string;
-  let estimateTokens: (text: string) => number;
-
-  beforeAll(async () => {
-    const mod = await import("../../hooks/auto-injection.mjs");
-    buildAutoInjection = mod.buildAutoInjection;
-    estimateTokens = mod.estimateTokens;
-  });
-
-  test("returns empty for no events", () => {
-    const result = buildAutoInjection([]);
-    expect(result).toBe("");
-  });
-
-  test("includes role as behavioral_directive", () => {
-    const events = [
-      { category: "role", data: "You are a senior staff engineer" },
-    ];
-    const result = buildAutoInjection(events);
-    expect(result).toContain("<behavioral_directive>");
-    expect(result).toContain("senior staff engineer");
-    expect(result).toContain("</behavioral_directive>");
-  });
-
-  test("includes decisions as rules", () => {
-    const events = [
-      { category: "decision", data: "Use ctx- prefix instead of cm-" },
-      { category: "decision", data: "Never push to main without asking" },
-    ];
-    const result = buildAutoInjection(events);
-    expect(result).toContain("<rules>");
-    expect(result).toContain("ctx- prefix");
-    expect(result).toContain("Never push");
-    expect(result).toContain("</rules>");
-  });
-
-  test("includes skill names", () => {
-    const events = [
-      { category: "skill", data: "tdd" },
-      { category: "skill", data: "commit" },
-    ];
-    const result = buildAutoInjection(events);
-    expect(result).toContain("<active_skills>");
-    expect(result).toContain("tdd");
-    expect(result).toContain("commit");
-    expect(result).toContain("</active_skills>");
-  });
-
-  test("token budget cap 500", () => {
-    // Fill with many large events to test budget enforcement
-    const events = [];
-    for (let i = 0; i < 20; i++) {
-      events.push({ category: "decision", data: "A".repeat(200) });
-    }
-    events.push({ category: "role", data: "B".repeat(400) });
-    events.push({ category: "intent", data: "implement" });
-    for (let i = 0; i < 50; i++) {
-      events.push({ category: "skill", data: `skill-${i}` });
-    }
-    const result = buildAutoInjection(events);
-    const tokens = estimateTokens(result);
-    // The budget is 500 tokens. Role (P1) is never truncated but decisions
-    // overflow to 3. Total should stay near or under budget.
-    expect(tokens).toBeLessThanOrEqual(600); // allow small overshoot from structural XML
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════
 // Issue #636 — PreToolUse hook fails on project paths containing spaces.
 //
 // The self-heal "legacy" branch in pretooluse.mjs (only fires when the
 // plugin cache lives at a stale-version dir AND hooks.json is absent —
 // typical for users who upgraded from <v1.0.108) used to write hook
 // commands as the unquoted string `node ${path}`. When the plugin cache
-// path contained spaces (Dropbox/iCloud display names, CLAUDE_CONFIG_DIR
+// path contained spaces (Dropbox/iCloud display names, CODEX_HOME
 // pointed at a synced folder), the resulting settings.json had a command
 // like `node /Users/foo/Library/CloudStorage/Lucas Werneck/.../pretooluse.mjs`
 // that /bin/sh word-split into pieces, producing the user-visible

@@ -12,7 +12,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 import { hasPlatformConfig, maybeForward } from "./platform-bridge.mjs";
-import { detectPlatformFromEnv } from "./core/platform-detect.mjs";
 
 export function createSessionLoaders(hookDir) {
   // Auto-detect bundle directory: bundles live in hooks/ root, not platform subdirs.
@@ -114,7 +113,7 @@ export function attributeAndInsertEvents(db, sessionId, events, input, projectDi
   // is missing. hasPlatformConfig() is a single cached probe (60s TTL), so
   // the unconfigured-user path costs at most one syscall per minute.
   if (hasPlatformConfig()) {
-    const platform = detectPlatformFromEnv();
+    const platform = "codex";
     // Session-wide rollup snapshot — stamped onto every outgoing event so
     // the analytics engine sees the seed.ts shape (tool_calls, errors,
     // unique_tools, ...). Defensive call: older SessionDB bundles that

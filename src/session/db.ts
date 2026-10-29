@@ -92,6 +92,12 @@ export function resolveDefaultSessionDir(opts: DefaultSessionDirOptions): string
     return legacy;
   }
 
+  // Hooks and the Codex adapter must share the context-mode storage override.
+  const dataRoot = env.CONTEXT_MODE_DATA_DIR;
+  if (dataRoot && dataRoot.trim() !== "") {
+    return join(resolveConfigDirValue(dataRoot), "context-mode", "sessions");
+  }
+
   return join(resolveConfigDirForDefaultSession(opts.configDir, opts.configDirEnv, env), "context-mode", "sessions");
 }
 
