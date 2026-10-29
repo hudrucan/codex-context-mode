@@ -42,6 +42,7 @@ import {
   resolveContentStorageDir,
   resolveDefaultSessionDir,
   resolveSessionDbPath,
+  getWorktreeSuffix,
   resolveSessionStorageDir,
   resolveStatsStorageDir,
   SessionDB,
@@ -68,7 +69,7 @@ import { parseCodexContextModePluginRoot } from "./adapters/codex/index.js";
 import { getHookScriptPaths } from "./util/hook-config.js";
 import { stripJsonComments } from "./util/jsonc.js";
 import { resolveClaudeConfigDir } from "./util/claude-config.js";
-import { resolveProjectDir } from "./util/project-dir.js";
+import { resolveCodexRequestContext, resolveProjectDir } from "./util/project-dir.js";
 import { loadDatabase } from "./db-base.js";
 import { AnalyticsEngine, formatReport, getConversationStats, getContentBytesAllSessions, getConversationWindowStats, getLifetimeStats, getMultiAdapterLifetimeStats, getRealBytesStats, pricePerToken } from "./session/analytics.js";
 const __pkg_dir = dirname(fileURLToPath(import.meta.url));
@@ -148,7 +149,7 @@ export const server = new McpServer({
 export interface RegisteredCtxTool {
   name: string;
   config: Record<string, unknown>;
-  handler: (args: Record<string, unknown>) => Promise<unknown> | unknown;
+  handler: (args: Record<string, unknown>, extra?: { _meta?: Record<string, unknown> }) => Promise<unknown> | unknown;
 }
 
 export const REGISTERED_CTX_TOOLS: RegisteredCtxTool[] = [];
@@ -294,28 +295,38 @@ const originalRegisterTool = server.registerTool.bind(server);
 function wrapToolHandler(
   name: string,
   handler: (toolArgs: Record<string, unknown>) => Promise<unknown> | unknown,
-): (toolArgs: Record<string, unknown>) => Promise<unknown> {
-  return async (toolArgs: Record<string, unknown>) => {
-    // #854: mark a tool call in-flight so the bridge-child idle reaper never
-    // shuts the server down mid-execution during a long ctx_execute/batch that
-    // emits no further inbound messages. Symmetric end in finally (success+error).
-    noteRequestStart();
-    try {
-      return await handler(toolArgs);
-    } catch (err) {
-      const result = storageErrorResult(err);
-      if (result) {
-        try {
-          return trackResponse(name, result);
-        } catch (trackErr) {
-          if (trackErr instanceof StorageDirectoryError) return result;
-          throw trackErr;
+): (toolArgs: Record<string, unknown>, extra?: { _meta?: Record<string, unknown> }) => Promise<unknown> {
+  return async (toolArgs: Record<string, unknown>, extra?: { _meta?: Record<string, unknown> }) => {
+    // Initialization notifications do not wait for asynchronous adapter loading.
+    if (server.server.getClientVersion() && !_detectedAdapter) await getDiagnosticAdapter();
+    const invoke = async () => {
+      // Keep request context active through execution, tracking and error handling.
+      noteRequestStart();
+      try {
+        return await handler(toolArgs);
+      } catch (err) {
+        const result = storageErrorResult(err);
+        if (result) {
+          try {
+            return trackResponse(name, result);
+          } catch (trackErr) {
+            if (trackErr instanceof StorageDirectoryError) return result;
+            throw trackErr;
+          }
         }
+        throw err;
+      } finally {
+        noteRequestEnd();
       }
-      throw err;
-    } finally {
-      noteRequestEnd();
+    };
+    if (projectDirOverride.getStore() || detectPlatform(server.server.getClientVersion() ?? undefined).platform !== "codex") return invoke();
+    const explicitDir = process.env.CONTEXT_MODE_PROJECT_DIR_SOURCE === "cwd"
+      ? undefined : process.env.CONTEXT_MODE_PROJECT_DIR;
+    const context = resolveCodexRequestContext(extra?._meta, undefined, explicitDir);
+    if (!context) {
+      throw new Error("Codex MCP call has no thread identity or explicit workspace; refusing to guess from another session.");
     }
+    return withProjectDirOverride(context, invoke);
   };
 }
 
@@ -434,8 +445,8 @@ writeFileSync(
 // snippets under /tmp when the host process exits.
 process.on("exit", () => { try { unlinkSync(CM_FS_PRELOAD); } catch { /* best effort */ } });
 
-// Lazy singleton — no DB overhead unless index/search is used
-let _store: ContentStore | null = null;
+// Shared MCP connections can serve more than one project.
+const stores = new Map<string, ContentStore>();
 
 /**
  * Build the FK-attribution object passed to every ContentStore.index*() call
@@ -499,9 +510,7 @@ export function resolveSessionIdFromSessionDB(opts?: {
 
 /**
  * Auto-index session events files written by SessionStart hook.
- * Scans ~/.claude/context-mode/sessions/ for *-events.md files.
- * CLAUDE_PROJECT_DIR is NOT available to MCP servers — only to hooks —
- * so we glob-scan instead of computing a specific hash.
+ * Consumes only this project's snapshots; other repos share the sessions dir.
  * Files are consumed (deleted) after indexing to prevent double-indexing.
  * Called on every getStore() — readdirSync is sub-millisecond when no files match.
  */
@@ -509,7 +518,13 @@ function maybeIndexSessionEvents(store: ContentStore): void {
   try {
     const sessionsDir = getSessionDir();
     if (!existsSync(sessionsDir)) return;
-    const files = readdirSync(sessionsDir).filter(f => f.endsWith("-events.md"));
+    const projectDir = getProjectDir();
+    const suffix = getWorktreeSuffix(projectDir);
+    const names = new Set([
+      `${hashProjectDirCanonical(projectDir)}${suffix}-events.md`,
+      `${hashProjectDirLegacy(projectDir)}${suffix}-events.md`,
+    ]);
+    const files = readdirSync(sessionsDir).filter(f => names.has(f));
     for (const file of files) {
       const filePath = join(sessionsDir, file);
       try {
@@ -541,7 +556,14 @@ async function getDiagnosticAdapter(): Promise<HookAdapter | null> {
   if (_detectedAdapter) return _detectedAdapter;
   try {
     const { getAdapter } = await import("./adapters/detect.js");
-    const signal = detectPlatform();
+    const clientInfo = server.server.getClientVersion();
+    const signal = detectPlatform(clientInfo ?? undefined);
+    // Only cache a selection once the SDK has received the initialize identity.
+    if (clientInfo) {
+      _detectedAdapter = await getAdapter(signal.platform);
+      console.error(`MCP client: ${clientInfo.name} v${clientInfo.version} → ${signal.platform}`);
+      return _detectedAdapter;
+    }
     return await getAdapter(signal.platform);
   } catch {
     return null;
@@ -554,14 +576,14 @@ async function getDiagnosticAdapter(): Promise<HookAdapter | null> {
  */
 function getDefaultSessionDir(): string {
   if (_detectedAdapter) return _detectedAdapter.getSessionDir();
-  // Pre-detection path (race window before MCP `initialize` completes):
-  // call detectPlatform() (sync, env-var-based) and look up segments via
+  // Before adapter loading completes, use the SDK's verified identity when
+  // available and look up segments synchronously via
   // getSessionDirSegments() (sync map, no adapter instantiation). This keeps
   // non-Claude platforms from spilling sessions into ~/.claude/. For Claude
   // Code/Codex (single-segment roots), reroute through their config-dir
   // contracts so the pre-detection window does not split-state with hooks.
   try {
-    const signal = detectPlatform();
+    const signal = detectPlatform(server.server.getClientVersion() ?? undefined);
     const segments = getSessionDirSegments(signal.platform);
     if (segments) {
       return resolveDefaultSessionDir({
@@ -697,18 +719,20 @@ function getStorePath(): string {
 }
 
 function getStore(): ContentStore {
-  if (!_store) {
+  const dbPath = getStorePath();
+  let store = stores.get(dbPath);
+  if (!store) {
     // Content DB cleanup on fresh start is handled by SessionStart hook.
     // Server just opens whatever DB exists (or creates new if hook deleted it).
-    const dbPath = getStorePath();
-    _store = new ContentStore(dbPath);
+    store = new ContentStore(dbPath);
+    stores.set(dbPath, store);
 
     // Wire deny-policy hook: store re-checks the Read deny list before
     // re-reading any file_path during auto-refresh. Catches policy edits
     // made after a file was originally indexed. See #442 round-3.
-    _store.setDenyChecker((filePath: string) => {
+    const projectDir = getProjectDir();
+    store.setDenyChecker((filePath: string) => {
       try {
-        const projectDir = getProjectDir();
         const denyGlobs = readToolDenyPatterns("Read", projectDir);
         const r = evaluateFilePath(
           filePath,
@@ -727,7 +751,7 @@ function getStore(): ContentStore {
     try {
       const contentDir = dirname(getStorePath());
       cleanupStaleContentDBs(contentDir, 14);
-      _store.cleanupStaleSources(14);
+      store.cleanupStaleSources(14);
       // Also clean legacy shared dir from before platform isolation
       const legacyDir = join(homedir(), ".context-mode", "content");
       if (existsSync(legacyDir)) cleanupStaleContentDBs(legacyDir, 0);
@@ -736,8 +760,8 @@ function getStore(): ContentStore {
     // Also clean old PID-based DBs from migration
     cleanupStaleDBs();
   }
-  maybeIndexSessionEvents(_store);
-  return _store;
+  maybeIndexSessionEvents(store);
+  return store;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -1113,7 +1137,7 @@ function checkDenyPolicy(
   toolName: string,
 ): ToolResult | null {
   try {
-    const policies = readBashPolicies(process.env.CLAUDE_PROJECT_DIR);
+    const policies = readBashPolicies(getProjectDir());
     const result = evaluateCommandDenyOnly(command, policies);
     if (result.decision === "deny") {
       return trackResponse(toolName, {
@@ -1142,7 +1166,7 @@ function checkNonShellDenyPolicy(
   try {
     const commands = extractShellCommands(code, language);
     if (commands.length === 0) return null;
-    const policies = readBashPolicies(process.env.CLAUDE_PROJECT_DIR);
+    const policies = readBashPolicies(getProjectDir());
     for (const cmd of commands) {
       const result = evaluateCommandDenyOnly(cmd, policies);
       if (result.decision === "deny") {
@@ -4549,9 +4573,10 @@ EXAMPLE: ctx_purge(confirm: true, scope: "project")`,
     try {
       storePathForPurge = getStorePath();
     } catch { /* best effort — store path may be unresolvable on fresh install */ }
-    if (_store) {
-      try { _store.cleanup(); } catch { /* best effort */ }
-      _store = null;
+    if (storePathForPurge) {
+      const store = stores.get(storePathForPurge);
+      try { store?.cleanup(); } catch { /* best effort */ }
+      stores.delete(storePathForPurge);
     }
 
     // FTS5 store: pass contentDir so purgeSession sweeps BOTH canonical
@@ -4866,7 +4891,8 @@ async function main() {
   // Clean up own DB + backgrounded processes + preload script on shutdown
   const shutdown = () => {
     executor.cleanupBackgrounded();
-    if (_store) _store.close(); // persist DB for --continue sessions
+    for (const store of stores.values()) store.close(); // persist DBs for --continue sessions
+    stores.clear();
     try { unlinkSync(CM_FS_PRELOAD); } catch { /* best effort */ }
     // Remove MCP readiness sentinel (#230)
     try { unlinkSync(mcpSentinel); } catch { /* best effort */ }
@@ -4892,6 +4918,7 @@ async function main() {
   // Lifecycle guard: detect parent death + stdin close to prevent orphaned processes (#103)
   startLifecycleGuard({ onShutdown: () => gracefulShutdown() });
 
+  server.server.oninitialized = () => { void getDiagnosticAdapter(); };
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
@@ -4914,17 +4941,6 @@ async function main() {
     try { writeFileSync(mcpSentinel, String(process.pid)); } catch { /* best effort */ }
   }, 30_000);
   sentinelRefresh.unref();
-
-  // Detect platform adapter — stored for platform-aware session paths
-  try {
-    const { detectPlatform, getAdapter } = await import("./adapters/detect.js");
-    const clientInfo = server.server.getClientVersion();
-    const signal = detectPlatform(clientInfo ?? undefined);
-    _detectedAdapter = await getAdapter(signal.platform);
-    if (clientInfo) {
-      console.error(`MCP client: ${clientInfo.name} v${clientInfo.version} → ${signal.platform}`);
-    }
-  } catch { /* best effort — _detectedAdapter stays null, falls back to .claude */ }
 
   // Restore tool-call counters from SessionDB BEFORE the heartbeat fires
   // so the very first persistStats() carries the prior PID's totals into

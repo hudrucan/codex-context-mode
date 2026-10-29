@@ -182,6 +182,8 @@ export function resolveProjectDirFromTranscript(opts: {
 export function resolveCodexSessionCwd(opts?: {
   /** Defaults to `process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex")`. */
   codexHome?: string;
+  /** MCP calls must select their own thread, independent of other rollouts' mtimes. */
+  sessionId?: string;
   /**
    * Optional freshness guard — Codex appends to the active log while the
    * session is running, so a stale log from days ago must not become a
@@ -191,6 +193,8 @@ export function resolveCodexSessionCwd(opts?: {
   /** Test seam for transcriptMaxAgeMs. Defaults to Date.now(). */
   now?: number;
 }): string | null {
+  const sessionId = opts?.sessionId;
+  if (sessionId !== undefined && !/^[a-zA-Z0-9_-]{1,128}$/.test(sessionId)) return null;
   const codexHome =
     opts?.codexHome ?? process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex");
   const sessionsDir = path.join(codexHome, "sessions");
@@ -217,8 +221,9 @@ export function resolveCodexSessionCwd(opts?: {
         continue;
       }
       if (!stat.isFile() || !entry.endsWith(".jsonl")) continue;
+      if (sessionId && entry !== `${sessionId}.jsonl` && !entry.endsWith(`-${sessionId}.jsonl`)) continue;
       const m = stat.mtimeMs;
-      if (m > bestMtime) { bestMtime = m; bestPath = fp; }
+      if (!bestPath || m > bestMtime) { bestMtime = m; bestPath = fp; }
     }
   };
   try {
@@ -226,7 +231,7 @@ export function resolveCodexSessionCwd(opts?: {
   } catch { return null; }
 
   if (!bestPath) return null;
-  if (typeof opts?.transcriptMaxAgeMs === "number") {
+  if (!sessionId && typeof opts?.transcriptMaxAgeMs === "number") {
     const nowMs = opts.now ?? Date.now();
     if (nowMs - bestMtime > opts.transcriptMaxAgeMs) return null;
   }
@@ -245,9 +250,11 @@ export function resolveCodexSessionCwd(opts?: {
         try {
           const obj = JSON.parse(line) as {
             type?: unknown;
-            meta?: { cwd?: unknown };
-            payload?: { cwd?: unknown };
+            meta?: { cwd?: unknown; id?: unknown };
+            payload?: { cwd?: unknown; id?: unknown };
           };
+          const metadata = obj?.meta ?? (obj?.type === "session_meta" ? obj?.payload : undefined);
+          if (sessionId && metadata?.id !== undefined && metadata.id !== sessionId) return null;
           const cwd = obj?.meta?.cwd ??
             (obj?.type === "session_meta" ? obj?.payload?.cwd : undefined);
           if (typeof cwd !== "string" || cwd.length === 0) continue;
@@ -260,6 +267,26 @@ export function resolveCodexSessionCwd(opts?: {
     }
   } catch { return null; /* file vanished mid-read */ }
   return null;
+}
+
+/** Codex's MCP metadata is separate from model-supplied tool arguments. */
+export function resolveCodexRequestContext(
+  meta: Record<string, unknown> | undefined,
+  codexHome?: string,
+  explicitProjectDir?: string,
+): { projectDir: string; sessionId?: string } | null {
+  const sessionId = meta?.threadId ?? meta?.sessionId;
+  if (sessionId !== undefined && (typeof sessionId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(sessionId))) {
+    throw new Error("Invalid Codex thread identity in MCP metadata.");
+  }
+  const pinnedDir = explicitProjectDir && path.isAbsolute(explicitProjectDir) && !isPluginInstallPath(explicitProjectDir)
+    ? explicitProjectDir : undefined;
+  if (sessionId === undefined) return pinnedDir ? { projectDir: pinnedDir } : null;
+  const projectDir = resolveCodexSessionCwd({ codexHome, sessionId }) ?? pinnedDir;
+  if (!projectDir) {
+    throw new Error("Cannot resolve this Codex thread's workspace; refusing to use another thread's repo.");
+  }
+  return { projectDir, sessionId };
 }
 
 /**

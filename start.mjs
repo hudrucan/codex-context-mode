@@ -43,11 +43,12 @@ if (!process.env.CLAUDE_PROJECT_DIR && safeOriginalCwd) {
   process.env.CLAUDE_PROJECT_DIR = safeOriginalCwd;
 }
 
-// Platform-agnostic project dir — guaranteed to be set for ALL platforms.
+// Platform-agnostic project dir, with provenance preserved across re-exec.
 // Adapters may set their own env var (GEMINI_PROJECT_DIR, etc.) but this
 // is the universal fallback so server.ts getProjectDir() never relies on cwd().
 if (!process.env.CONTEXT_MODE_PROJECT_DIR && safeOriginalCwd) {
   process.env.CONTEXT_MODE_PROJECT_DIR = safeOriginalCwd;
+  process.env.CONTEXT_MODE_PROJECT_DIR_SOURCE = "cwd";
 }
 
 // Routing instructions file auto-write DISABLED for all platforms (#158, #164).
