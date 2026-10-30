@@ -1,4 +1,4 @@
-# Codex runtime and OS support
+# codex-context-mode runtime and OS support
 
 This plugin uses Node.js >=22.5 with SQLite FTS5. Node 24 is recommended and is the runtime validated on Windows. The distributable contains prebuilt JavaScript bundles and does not require node_modules at startup. It never installs or repairs dependencies automatically. If the selected Node build lacks SQLite/FTS5, use a supported runtime with those capabilities and run doctor.
 

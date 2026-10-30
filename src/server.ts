@@ -806,7 +806,7 @@ function checkProjectBoundary(
         type: "text" as const,
         text:
           `File access blocked: "${filePath}" resolves outside the project root ` +
-          `(${projectDir}). context-mode confines ${toolName} to the workspace so it ` +
+          `(${projectDir}). codex-context-mode confines ${toolName} to the workspace so it ` +
           `cannot be used to bypass the host's sandbox/permission controls (issue #852). ` +
           `To intentionally process a file outside the project, add a host allow rule, ` +
           `e.g. "permissions": { "allow": ["Read(${filePath})"] } in your settings.`,
@@ -3748,7 +3748,7 @@ server.registerTool(
       openWorldHint: false,
     },
     description:
-      "Diagnose context-mode installation. Runs all checks server-side and " +
+      "Diagnose codex-context-mode installation. Runs all checks server-side and " +
       "returns a plain-text status report with [OK]/[FAIL]/[WARN] prefixes " +
       "(renderer-safe across MCP clients). No CLI execution needed.",
     inputSchema: z.object({}),
@@ -3761,7 +3761,7 @@ server.registerTool(
     // defined`. We avoid both task-list syntax AND `## ` h2 headings to stay
     // safe across all MCP renderers — using plain-text status prefixes
     // (`[OK]` / `[FAIL]` / `[WARN]`) instead.
-    const lines: string[] = ["context-mode doctor", ""];
+    const lines: string[] = ["codex-context-mode doctor", ""];
     const pluginRoot = getRuntimeAwarePackageRoot();
 
     // Runtimes
@@ -4132,7 +4132,7 @@ async function main() {
   setInterval(() => persistStats(), 60_000).unref();
 
   if (process.stdin.isTTY) {
-    console.error(`Context Mode MCP server v${VERSION} running on stdio`);
+    console.error(`codex-context-mode MCP server v${VERSION} running on stdio`);
     console.error(`Detected runtimes:\n${getRuntimeSummary(runtimes)}`);
     if (!hasBunRuntime()) {
       console.error(

@@ -1,6 +1,8 @@
-# Codex Context Mode
+# codex-context-mode
 
 A full local Codex plugin for code execution, SQLite FTS5 search and session continuity. Derived from [context-mode by Mert Koseoğlu](https://github.com/mksglu/context-mode), under [Elastic License 2.0](LICENSE); see [NOTICE](NOTICE) and [upstream credits](docs/UPSTREAM-CREDITS.md).
+
+Fork maintainer: [hudrucan](https://github.com/hudrucan). The product, plugin ID and display name are `codex-context-mode`; the marketplace ID is `hudrucan`.
 
 ## Build and install
 
@@ -12,17 +14,17 @@ From a reviewed checkout, run:
     npm run build
     npm run package-plugin
     codex plugin marketplace add "/absolute/path/to/codex-context-mode"
-    codex plugin add codex-context-mode@codex-context-mode
+    codex plugin add codex-context-mode@hudrucan
 
 On Windows, quote paths with spaces. Use Codex plugin management to enable/disable, update/reinstall a rebuilt local release, and uninstall:
 
-    codex plugin remove codex-context-mode@codex-context-mode
+    codex plugin remove codex-context-mode@hudrucan
 
 Do not separately register an MCP, copy skills, or install user hooks. The local marketplace points at the generated dist/codex-context-mode package; it uses neither a Git clone nor symlinks. Rebuild and repackage before installing source changes. No production configuration is modified by the build.
 
 ## Components and trust
 
-One stdio MCP named codex-context-mode exposes the existing ctx_* APIs. Six bundled skills are discovered by Codex as codex-context-mode:main, :doctor, :index, :search, :stats and :purge. Hosted analytics and self-upgrade commands are removed.
+One stdio MCP named codex-context-mode exposes nine existing ctx_* tools. Six bundled skills are discovered by Codex as codex-context-mode:main, :doctor, :index, :search, :stats and :purge. Hosted analytics and self-upgrade commands are removed.
 
 Six command hooks use the required PascalCase Codex events and kebab-case filenames: PreToolUse, PostToolUse, SessionStart, PreCompact, UserPromptSubmit and Stop. They run with Node, with the plugin path quoted.
 

@@ -1,13 +1,8 @@
 /**
- * error-classifier — PRD-context-as-a-service §5 ABI parity
+ * Per-event error and command classification.
  *
  * Pure classifiers that derive per-event metadata from PostToolUse hook
- * stdin, mirroring the seed shape produced by context-mode-platform's
- * `seed.ts` so the bridge can ship full seed-shape parity.
- *
- * The dashboard reads three derived columns that are populated by the
- * platform seeder but, per the OSS handoff (ANOMALY #3), are NEVER READ
- * by the engine when ingesting live events:
+ * stdin, preserving the existing event metadata schema:
  *
  *   • error_category   — one of 10 fixed buckets
  *   • error_tool       — tool name that produced the error
@@ -15,13 +10,11 @@
  *   • command_tool     — first token of the command (npm, git, pytest, …)
  *   • duration_bucket  — fast / medium / slow / timeout
  *
- * We populate them anyway, with sane defaults derived from message text
- * and tool name, so the dashboard renders symmetrically with seed.
+ * Values use defaults derived from message text and tool name.
  *
  * Hard constraints:
  *   1. Pure functions — no I/O, no globals, no module state.
- *   2. `error_category` MUST match seed's `pickErrorClassification`
- *      output exactly. The literal union below is the ABI.
+ *   2. `error_category` preserves the literal union below as its ABI.
  *   3. No external dependencies; TypeScript stdlib only.
  *   4. Robust to null / undefined / empty / malformed input.
  */

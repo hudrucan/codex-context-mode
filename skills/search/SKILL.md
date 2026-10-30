@@ -1,13 +1,13 @@
 ---
 name: search
 description: |
-  Search context-mode's persistent FTS5 knowledge base for previously indexed
+  Search codex-context-mode's persistent FTS5 knowledge base for previously indexed
   local project content, documentation, or session memory.
   Trigger: /codex-context-mode:search
 user-invocable: true
 ---
 
-# Context Mode Search
+# codex-context-mode search
 
 Search indexed content without rereading raw sources into conversation context.
 

@@ -169,7 +169,7 @@ function printTable(results: BenchResult[]) {
 }
 
 async function main() {
-  console.log("Context Mode — Performance Benchmarks");
+  console.log("codex-context-mode — Performance Benchmarks");
   console.log("======================================\n");
   console.log("System:");
   console.log(getRuntimeSummary(runtimes));
@@ -425,7 +425,7 @@ print(f"filtered: {len(filtered)}")
     "When Claude Code uses cat/head/Read to view a 50KB file, ALL 50KB enters context.",
   );
   console.log(
-    "With context-mode execute_file, only the summary (typically 100-500 bytes) enters context.",
+    "With codex-context-mode execute_file, only the summary (typically 100-500 bytes) enters context.",
   );
   console.log("This means 95-99% context savings on large files.\n");
 }

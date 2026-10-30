@@ -1,13 +1,13 @@
 ---
 name: purge
 description: |
-  Purge the context-mode knowledge base. Permanently deletes all indexed content
+  Purge the codex-context-mode knowledge base. Permanently deletes all indexed content
   and resets session stats. This is destructive and cannot be undone.
   Trigger: /codex-context-mode:purge
 user-invocable: true
 ---
 
-# Context Mode Purge
+# codex-context-mode purge
 
 Permanently deletes session data for this project. Two scopes are supported (issue #520):
 
@@ -45,5 +45,5 @@ Permanently deletes session data for this project. Two scopes are supported (iss
 
 - `ctx_purge` is the supported explicit purge tool. Do not manually delete live SQLite files.
 - `ctx_stats` is read-only — shows statistics only.
-- `/clear` and `/compact` do NOT affect any context-mode data.
+- `/clear` and `/compact` do NOT affect any codex-context-mode data.
 - There is no undo. Re-index content if you need it again.

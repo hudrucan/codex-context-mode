@@ -41,7 +41,7 @@ async function useCase(
 }
 
 async function main() {
-  console.log("Context Mode — Use Case Tests (Fixtures)");
+  console.log("codex-context-mode — Use Case Tests (Fixtures)");
   console.log("=========================================\n");
   console.log("Runtimes:\n" + getRuntimeSummary(runtimes));
 

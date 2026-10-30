@@ -12,7 +12,7 @@
 
 ## Context
 
-The per-conversation Section 1 `Without context-mode / With context-mode`
+The per-conversation Section 1 `Without codex-context-mode / With codex-context-mode`
 bar in `ctx_stats` quietly drifted from "honest compression ratio" to
 "infrastructure-size accounting" across two unrelated bug cascades:
 
@@ -61,7 +61,7 @@ if (bytesAvoided + bytesReturned == 0) {
   // Empty state — no measurable redirect activity yet.
   // Do NOT draw a degenerate bar. Emit one honest hint line:
   "No measurable redirect activity captured yet — bars will appear once
-   context-mode diverts its first payload."
+   codex-context-mode diverts its first payload."
 } else {
   Without = bytesAvoided + bytesReturned
   With    = max(1, bytesReturned)
@@ -83,7 +83,7 @@ The lifetime Section 3 / Section 4 totals (`14.7 MB kept out across
 200 projects`) are **unchanged** by this ADR — they aggregate
 `bytesAvoided + eventDataBytes + snapshotBytes` and the user
 expectation for the lifetime tier has historically been "all the
-bytes context-mode kept in storage", which is correct for those
+bytes codex-context-mode kept in storage", which is correct for those
 sections. Only the per-conversation `%` bar's semantic is corrected.
 
 ## Consequences
@@ -134,5 +134,5 @@ sections. Only the per-conversation `%` bar's semantic is corrected.
 | Lifetime headline | 14.7 MB ✓ | 14.7 MB ✓ | 14.7 MB ✓ |
 
 The 22× multiplier represents the actual context-window runway
-extension this conversation got from context-mode's redirects —
+extension this conversation got from codex-context-mode's redirects —
 the metric the user intuitively expected to see.

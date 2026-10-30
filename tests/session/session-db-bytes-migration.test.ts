@@ -2,7 +2,7 @@
  * SessionDB — bytes_avoided / bytes_returned schema migration (D2 PRD Phase 1).
  *
  * The session_events table must carry per-event byte accounting so the
- * Insight dashboard can compute "tokens returned" vs "tokens we kept out
+ * local reports can compute "tokens returned" vs "tokens we kept out
  * of the model's context window". Both columns are NOT NULL with a
  * default of 0 so existing callers (and rows) keep working unchanged.
  */

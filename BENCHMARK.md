@@ -1,4 +1,4 @@
-# Context Mode — Benchmark Results
+# codex-context-mode — historical upstream benchmark results
 
 > Historical upstream measurements, retained for attribution and comparison. Host names and context-window assumptions describe that benchmark environment, not supported integrations or a fresh performance claim for this Codex-only fork.
 

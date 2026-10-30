@@ -87,7 +87,7 @@ describe("formatReport", () => {
       expect(output).toContain("0 tokens saved");
       // Should NOT show the hero metric line or bars
       expect(output).not.toContain("tokens saved  ·");
-      expect(output).not.toContain("Without context-mode");
+      expect(output).not.toContain("Without codex-context-mode");
     });
 
     it("does not show fake percentages for fresh session", () => {
@@ -145,13 +145,13 @@ describe("formatReport", () => {
       });
       const output = formatReport(report);
 
-      expect(output).toContain("Without context-mode");
-      expect(output).toContain("With context-mode");
+      expect(output).toContain("Without codex-context-mode");
+      expect(output).toContain("With codex-context-mode");
       // Bars should contain unicode block characters
       expect(output).toMatch(/[█░]/);
       // The "Without" bar should be longer than "With" bar
       const withoutLine = output.split("\n").find((l: string) => l.includes("Without"));
-      const withLine = output.split("\n").find((l: string) => l.includes("With context-mode"));
+      const withLine = output.split("\n").find((l: string) => l.includes("With codex-context-mode"));
       expect(withoutLine).toBeDefined();
       expect(withLine).toBeDefined();
       const withoutFilled = (withoutLine!.match(/█/g) || []).length;
@@ -578,8 +578,8 @@ describe("formatReport", () => {
       expect(output).toContain("5h 6m");
 
       // Before/After bars
-      expect(output).toContain("Without context-mode");
-      expect(output).toContain("With context-mode");
+      expect(output).toContain("Without codex-context-mode");
+      expect(output).toContain("With codex-context-mode");
 
       // Per-tool breakdown
       expect(output).toContain("ctx_batch_execute");
@@ -656,8 +656,8 @@ describe("formatReport", () => {
       expect(lines[0]).toMatch(/tokens saved\s+·\s+.*reduction\s+·\s+5h 6m/);
 
       // Lines 2-3: Before/After bars
-      expect(lines[2]).toMatch(/Without context-mode\s+\|█+\|\s+\d/);
-      expect(lines[3]).toMatch(/With context-mode\s+\|█+░+\|\s+\d/);
+      expect(lines[2]).toMatch(/Without codex-context-mode\s+\|█+\|\s+\d/);
+      expect(lines[3]).toMatch(/With codex-context-mode\s+\|█+░+\|\s+\d/);
 
       // "kept out" value statement
       expect(output).toContain("kept out of your conversation");
@@ -742,8 +742,8 @@ describe("v1.0.148 Bug G — Section 1 bar uses strict-compression formula", () 
 
     // No Without/With bar should render — instead an honest hint line.
     expect(output).toMatch(/No measurable redirect activity captured yet/i);
-    expect(output).not.toMatch(/Without context-mode\s+\d+/);
-    expect(output).not.toMatch(/With context-mode\s+\d+/);
+    expect(output).not.toMatch(/Without codex-context-mode\s+\d+/);
+    expect(output).not.toMatch(/With codex-context-mode\s+\d+/);
   });
 
   it("mixed case: 60% kept out when bytesAvoided=6KB, bytesReturned=4KB (eventDataBytes ignored)", () => {

@@ -1620,7 +1620,7 @@ export function renderCostExample(
     );
 
   out.push(
-    `  context-mode kept ${kb(lifetimeBytes)} out of context — that's ${cursorMonths} months of Cursor Pro paid for itself.`,
+    `  codex-context-mode kept ${kb(lifetimeBytes)} out of context — that's ${cursorMonths} months of Cursor Pro paid for itself.`,
   );
   if (teamUsd > 0 && teamYearUsd > 0) {
     out.push("");
@@ -1725,7 +1725,7 @@ function renderNarrative5Section(args: {
   // Daily-average sub-line — never tease users with a tiny number when the
   // average is sub-MB (still informative); fall back to KB display.
   const dailyBytes = lifetimeDays > 0 ? lifetimeBytes / lifetimeDays : 0;
-  out.push(`  context-mode kept ${kb(lifetimeBytes)} out of your context window — about ${kb(dailyBytes)} every single day.`);
+  out.push(`  codex-context-mode kept ${kb(lifetimeBytes)} out of your context window — about ${kb(dailyBytes)} every single day.`);
   out.push("");
   out.push("");
 
@@ -1788,7 +1788,7 @@ function renderNarrative5Section(args: {
   if (measuredAvoided + measuredReturned === 0) {
     // No measurable redirect activity yet — captures may exist, but
     // nothing has been diverted from the model context window.
-    out.push("  No measurable redirect activity captured yet — bars will appear once context-mode diverts its first payload.");
+    out.push("  No measurable redirect activity captured yet — bars will appear once codex-context-mode diverts its first payload.");
     out.push("");
   } else {
     const convBytesWithout  = measuredAvoided + measuredReturned;
@@ -1799,8 +1799,8 @@ function renderNarrative5Section(args: {
     const withBar    = dataBar(convTokensWith,    convTokensWithout, 32);
     const convPct    = (1 - convTokensWith / convTokensWithout) * 100;
     const convMult   = Math.max(1, Math.round(convTokensWithout / convTokensWith));
-    out.push(`  Without context-mode  ${kb(convBytesWithout).padStart(8)}  ${withoutBar}   ${fmtNum(convTokensWithout).padStart(7)} tokens`);
-    out.push(`  With context-mode     ${kb(convBytesWith).padStart(8)}  ${withBar}   ${fmtNum(convTokensWith).padStart(7)} tokens`);
+    out.push(`  Without codex-context-mode  ${kb(convBytesWithout).padStart(8)}  ${withoutBar}   ${fmtNum(convTokensWithout).padStart(7)} tokens`);
+    out.push(`  With codex-context-mode     ${kb(convBytesWith).padStart(8)}  ${withBar}   ${fmtNum(convTokensWith).padStart(7)} tokens`);
     out.push(`                          ${convPct.toFixed(1)}% kept out of context · your AI ran ${convMult}× longer before /compact fired`);
     out.push("");
   }
@@ -1868,7 +1868,7 @@ function renderNarrative5Section(args: {
   out.push("");
 
   // ── Section 5 — What context-mode learned about how you work.
-  out.push("  ─── 5. What context-mode learned about how you work ───");
+  out.push("  ─── 5. What codex-context-mode learned about how you work ───");
   out.push("");
   if (lifetime && lifetime.autoMemoryCount > 0) {
     out.push(`  ${lifetime.autoMemoryCount} preferences picked up across ${lifetime.autoMemoryProjects} project${lifetime.autoMemoryProjects === 1 ? "" : "s"}:`);
@@ -1879,7 +1879,7 @@ function renderNarrative5Section(args: {
       out.push(`    ${label.padEnd(26)} ${String(count).padStart(2)}   ${dataBar(count, maxAm, 20)}`);
     }
   } else {
-    out.push("  No preferences learned yet — context-mode picks them up automatically.");
+    out.push("  No preferences learned yet — codex-context-mode picks them up automatically.");
   }
   out.push("");
   out.push("");
@@ -1888,7 +1888,7 @@ function renderNarrative5Section(args: {
   out.push("  Your AI talks less, remembers more, costs less.");
   out.push(`  Locale ${locale} · timezone ${tz} · pricing examples for illustration only.`);
   out.push("");
-  const versionStr = version ? `v${version}` : "context-mode";
+  const versionStr = version ? `v${version}` : "codex-context-mode";
   out.push(`  ${versionStr}`);
   if (version && latestVersion && latestVersion !== "unknown" && semverNewer(latestVersion, version)) {
     out.push(`  Update available: v${version} -> v${latestVersion}`);
@@ -2258,12 +2258,12 @@ function renderHero(args: {
   const { lifetimeTokensWithout, lifetimeTokensWith, lifetimeUsd, lifetimeWithUsd, savedPct, totalConversations, firstDate } = args;
   const out: string[] = [];
   const since = firstDate ? `  ·  since ${firstDate}` : "";
-  out.push(`  ${lifetimeUsd} saved with context-mode  ·  ${savedPct.toFixed(1)}% reduction${since}`);
+  out.push(`  ${lifetimeUsd} saved with codex-context-mode  ·  ${savedPct.toFixed(1)}% reduction${since}`);
   out.push("");
   const withoutBar = dataBar(lifetimeTokensWithout, lifetimeTokensWithout, 32);
   const withBar = dataBar(lifetimeTokensWith, lifetimeTokensWithout, 32);
-  out.push(`  Without context-mode  ${fmtNum(lifetimeTokensWithout).padStart(7)} tokens  ${withoutBar}   ${lifetimeUsd}`);
-  out.push(`  With context-mode     ${fmtNum(lifetimeTokensWith).padStart(7)} tokens  ${withBar}   ${lifetimeWithUsd}`);
+  out.push(`  Without codex-context-mode  ${fmtNum(lifetimeTokensWithout).padStart(7)} tokens  ${withoutBar}   ${lifetimeUsd}`);
+  out.push(`  With codex-context-mode     ${fmtNum(lifetimeTokensWith).padStart(7)} tokens  ${withBar}   ${lifetimeWithUsd}`);
   const kept = lifetimeTokensWithout - lifetimeTokensWith;
   out.push(`                        ${fmtNum(kept).padStart(7)} tokens kept out  ·  across ${totalConversations.toLocaleString("en-US")} conversations`);
   return out;
@@ -2403,7 +2403,7 @@ export function formatReport(
 
   // ── Fresh session: no savings yet ──
   if (totalKeptOut === 0) {
-    lines.push(`context-mode  ${duration}  ${totalCalls} calls`);
+    lines.push(`codex-context-mode  ${duration}  ${totalCalls} calls`);
     lines.push("");
 
     if (totalCalls === 0) {
@@ -2419,7 +2419,7 @@ export function formatReport(
 
     // Footer
     lines.push("");
-    const versionStr = version ? `v${version}` : "context-mode";
+    const versionStr = version ? `v${version}` : "codex-context-mode";
     lines.push(versionStr);
     if (version && latestVersion && latestVersion !== "unknown" && semverNewer(latestVersion, version)) {
       lines.push(`Update available: v${version} -> v${latestVersion}`);
@@ -2437,8 +2437,8 @@ export function formatReport(
   lines.push("");
 
   // Lines 2-3: Before/After comparison bars — the visual proof
-  lines.push(`Without context-mode  |${dataBar(grandTotal, grandTotal)}| ${kb(grandTotal)}`);
-  lines.push(`With context-mode     |${dataBar(totalReturned, grandTotal)}| ${kb(totalReturned)}`);
+  lines.push(`Without codex-context-mode  |${dataBar(grandTotal, grandTotal)}| ${kb(grandTotal)}`);
+  lines.push(`With codex-context-mode     |${dataBar(totalReturned, grandTotal)}| ${kb(totalReturned)}`);
   lines.push("");
 
   // Value statement — the line people share
@@ -2516,7 +2516,7 @@ export function formatReport(
 
   // ── Footer ──
   lines.push("");
-  const versionStr = version ? `v${version}` : "context-mode";
+  const versionStr = version ? `v${version}` : "codex-context-mode";
   lines.push(versionStr);
   if (version && latestVersion && latestVersion !== "unknown" && latestVersion !== version) {
     lines.push(`Update available: v${version} -> v${latestVersion}`);

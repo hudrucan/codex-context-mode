@@ -4047,7 +4047,7 @@ describe("startup banner suppressed in stdio transport mode", () => {
       setTimeout(() => { proc.kill(); res(data); }, 300);
     });
 
-    expect(stderr).not.toContain("Context Mode MCP server");
+    expect(stderr).not.toContain("codex-context-mode MCP server");
     expect(stderr).not.toContain("Detected runtimes:");
   });
 });

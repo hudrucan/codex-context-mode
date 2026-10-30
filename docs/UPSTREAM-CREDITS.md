@@ -1,6 +1,8 @@
-# Upstream Credits
+# codex-context-mode upstream credits
 
 This Codex-only fork derives from [context-mode by Mert Koseoğlu](https://github.com/mksglu/context-mode). The project remains subject to the [Elastic License 2.0](../LICENSE); preserve its upstream attribution.
+
+The fork is maintained by [hudrucan](https://github.com/hudrucan). Plugin author/developer metadata identifies the fork maintainer; package author metadata, NOTICE and this document retain the original author attribution.
 
 ## Historical operating skills
 

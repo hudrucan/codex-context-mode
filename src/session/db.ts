@@ -94,7 +94,7 @@ function invalidStorageOverride(kind: StorageDirectoryKind, path: string, detail
     path,
     STORAGE_ROOT_ENV,
     undefined,
-    [`Invalid ${STORAGE_ROOT_ENV} for context-mode ${kind} directory: ${detail}`, storageDirectoryHint()].join("\n"),
+    [`Invalid ${STORAGE_ROOT_ENV} for codex-context-mode ${kind} directory: ${detail}`, storageDirectoryHint()].join("\n"),
   );
 }
 
@@ -242,7 +242,7 @@ function storageDirectoryErrorMessage(
   metadata: Pick<ResolvedStorageDir, "ignoredEnvVar" | "ignoredReason"> = {},
 ): string {
   return [
-    `context-mode ${kind} directory is not writable: ${path}`,
+    `codex-context-mode ${kind} directory is not writable: ${path}`,
     ignoredStorageOverrideHint(metadata),
     storageDirectoryHint(),
   ].filter(Boolean).join("\n");
@@ -1221,8 +1221,7 @@ export class SessionDB extends SQLiteBase {
    * window (`bytesAvoided`) and the total it actually returned to the
    * model (`bytesReturned`). Both default to 0 for unknown sessions.
    *
-   * Used by the Insight dashboard to render the "saved vs returned"
-   * panel without scanning every event row in JS.
+   * Supports local byte-accounting reports without scanning every event row in JS.
    */
   getEventBytesSummary(sessionId: string): { bytesAvoided: number; bytesReturned: number } {
     const row = this.stmt(S.getEventBytesSummary).get(sessionId) as

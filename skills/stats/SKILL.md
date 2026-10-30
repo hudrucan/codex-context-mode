@@ -1,7 +1,7 @@
 ---
 name: stats
 description: |
-  Show how much context window context-mode saved this session.
+  Show how much context window codex-context-mode saved this session.
   Displays token consumption, context savings ratio, and per-tool breakdown.
   Read-only — shows stats only, no reset capability.
   To wipe the knowledge base entirely, use ctx_purge instead.
@@ -9,7 +9,7 @@ description: |
 user-invocable: true
 ---
 
-# Context Mode Stats
+# codex-context-mode stats
 
 Show context savings for the current session.
 
@@ -18,8 +18,8 @@ Show context savings for the current session.
 1. Call the `ctx_stats` MCP tool (no parameters needed).
 2. **CRITICAL**: You MUST copy-paste the ENTIRE tool output as markdown text directly into your response message. Do NOT summarize, do NOT collapse, do NOT paraphrase. Copy every line exactly as returned by the tool.
 3. After the full output, add ONE sentence highlighting the key savings metric, e.g.:
-   - "context-mode saved **12.4x** — 92% of data stayed in sandbox."
-   - If no data yet: "No context-mode calls yet this session."
+   - "codex-context-mode saved **12.4x** — 92% of data stayed in sandbox."
+   - If no data yet: "No codex-context-mode calls yet this session."
 
 ## Purge
 

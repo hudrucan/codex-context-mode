@@ -1,12 +1,12 @@
 ---
 name: doctor
 description: |
-  Run Codex context-mode diagnostics: runtimes, hooks, FTS5 and local installation.
+  Run codex-context-mode diagnostics: runtimes, hooks, FTS5 and local installation.
   Trigger: /codex-context-mode:doctor
 user-invocable: true
 ---
 
-# Context Mode Doctor
+# codex-context-mode doctor
 
 ## Instructions
 

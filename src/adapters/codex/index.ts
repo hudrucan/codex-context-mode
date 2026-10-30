@@ -131,7 +131,7 @@ export class CodexAdapter extends BaseAdapter implements HookAdapter {
           hookEventName: "PreToolUse",
           permissionDecision: "deny",
           permissionDecisionReason:
-            response.reason ?? "Blocked by context-mode hook",
+      response.reason ?? "Blocked by codex-context-mode hook",
         },
       };
     }
@@ -203,7 +203,7 @@ export class CodexAdapter extends BaseAdapter implements HookAdapter {
     const canonical = table.filter(s => /^plugins\.(?:"codex-context-mode(?:@[^"]+)?"|'codex-context-mode(?:@[^']+)?'|codex-context-mode)$/.test(s.name) && !/^\s*enabled\s*=\s*false/m.test(s.body));
     const standalone = table.some(s => /^mcp_servers\.["']?(?:codex-context-mode|codex_context_mode|context-mode|context_mode)["']?(?:\.|$)/.test(s.name));
     const stale = table.some(s => /^plugins\.(?:"context-mode(?:@[^"]+)?"|'context-mode(?:@[^']+)?'|context-mode)$/.test(s.name));
-    if (standalone || canonical.length > 1) return {check: "MCP registration", status: "fail", message: "Duplicate/standalone Context Mode registrations; keep one codex-context-mode plugin."};
+    if (standalone || canonical.length > 1) return {check: "MCP registration", status: "fail", message: "Duplicate/standalone codex-context-mode registrations; keep one codex-context-mode plugin."};
     if (stale) return {check: "MCP registration", status: "fail", message: "Stale upstream context-mode plugin registration."};
     return {check: "MCP registration", status: canonical.length === 1 ? "pass" : "fail", message: canonical.length === 1 ? "One codex-context-mode plugin enabled" : "Install and enable codex-context-mode in Codex"};
   }
@@ -221,13 +221,13 @@ export class CodexAdapter extends BaseAdapter implements HookAdapter {
     }
     const settings = read(this.getSettingsPath());
     const inlineCommands = settings.split(/\[\[hooks\./).slice(1).flatMap(s => s.match(/^\s*command\s*=.*$/gm) ?? []);
-    add("Native user-hook duplicates", !inlineCommands.some(ownedCommand), "No standalone Context Mode native hooks");
+    add("Native user-hook duplicates", !inlineCommands.some(ownedCommand), "No standalone codex-context-mode native hooks");
     const userHooks = read(this.getHooksPath());
     if (userHooks) {
       try {
         const parsed = JSON.parse(userHooks);
         const commands = Object.values(parsed.hooks ?? {}).flatMap((groups: any) => Array.isArray(groups) ? groups.flatMap((g: any) => (g.hooks ?? []).map((h: any) => String(h.command ?? ""))) : []);
-        add("Standalone user hooks", !commands.some(ownedCommand), "No separate Context Mode user hooks");
+        add("Standalone user hooks", !commands.some(ownedCommand), "No separate codex-context-mode user hooks");
       } catch { add("Standalone user hooks", false, "Invalid user hooks.json"); }
     }
     add("Stale upstream installation", !staleUpstreamCache(join(this.getConfigDir(), "plugins", "cache")), "No upstream context-mode cache in any marketplace");

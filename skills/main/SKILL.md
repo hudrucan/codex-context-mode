@@ -1,17 +1,17 @@
 ---
 name: main
 description: |
-  Use context-mode tools to process large outputs: logs, tests, builds, JSON/API
+  Use codex-context-mode tools to process large outputs: logs, tests, builds, JSON/API
   responses, dependency analysis, broad repository searches and browser snapshots.
   Prefer ctx_execute or ctx_execute_file for code-driven analysis and ctx_search
   for relevant indexed snippets. Use native reading when preparing an edit.
 ---
 
-# Context Mode for Codex
+# codex-context-mode
 
 ## Route by the work
 
-Use context-mode when output may be large or unpredictable. Write code to derive the answer; print useful results instead of dumping raw data into the conversation.
+Use codex-context-mode when output may be large or unpredictable. Write code to derive the answer; print useful results instead of dumping raw data into the conversation.
 
 | Work | Tool |
 |---|---|

@@ -275,7 +275,7 @@ describe("formatReport — Bugs #5/#6/#7/#8", () => {
     const idx2 = text.indexOf("─── 2. What this chat captured");
     const idx3 = text.indexOf("─── 3. The scope, getting wider ───");
     const idx4 = text.indexOf("─── 4. The bottom line ───");
-    const idx5 = text.indexOf("─── 5. What context-mode learned about how you work ───");
+    const idx5 = text.indexOf("─── 5. What codex-context-mode learned about how you work ───");
     expect(idx1).toBeGreaterThan(-1);
     expect(idx2).toBeGreaterThan(idx1);
     expect(idx3).toBeGreaterThan(idx2);
@@ -285,7 +285,7 @@ describe("formatReport — Bugs #5/#6/#7/#8", () => {
     // Opener — the headline tally.
     expect(text).toMatch(/Across\s+\d+\s+days you ran\s+\d+\s+conversations/);
     // Single-unit auto-decimals: >= 100 drops the decimal (356 MB, not 356.0 MB).
-    expect(text).toMatch(/context-mode kept\s+356 MB[^\n]*out of your context window/);
+    expect(text).toMatch(/codex-context-mode kept\s+356 MB[^\n]*out of your context window/);
 
     // Section 1 — datetime + days alive + rescue.
     expect(text).toMatch(/started.*\d{4}.*at \d{2}:\d{2}/);

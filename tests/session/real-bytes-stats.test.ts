@@ -786,8 +786,8 @@ describe("v1.0.148 Bug G — strict-compression formula (Section 1 Without/With)
     expect(pct).toBeLessThanOrEqual(96);
 
     // Without / With bars: bytes labels are formatted via kb().
-    const withoutLine = lines.find((l) => /Without context-mode/.test(l));
-    const withLine    = lines.find((l) => /With context-mode/.test(l));
+    const withoutLine = lines.find((l) => /Without codex-context-mode/.test(l));
+    const withLine    = lines.find((l) => /With codex-context-mode/.test(l));
     expect(withoutLine, `Without line missing:\n${text}`).toBeDefined();
     expect(withLine,    `With line missing:\n${text}`).toBeDefined();
 
@@ -825,9 +825,9 @@ describe("v1.0.148 Bug G — empty-state branch (no degenerate bar)", () => {
     const lines = text.split("\n");
 
     // No Without/With bars in this empty state.
-    expect(lines.find((l) => /Without context-mode/.test(l)),
+    expect(lines.find((l) => /Without codex-context-mode/.test(l)),
       `Without bar should NOT render in empty state:\n${text}`).toBeUndefined();
-    expect(lines.find((l) => /With context-mode/.test(l)),
+    expect(lines.find((l) => /With codex-context-mode/.test(l)),
       `With bar should NOT render in empty state:\n${text}`).toBeUndefined();
 
     // And no "0% kept out" or "100% kept out" degenerate ratio line.

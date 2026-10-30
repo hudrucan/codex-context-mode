@@ -1,6 +1,6 @@
-# context-mode routing for Codex
+# codex-context-mode routing for Codex
 
-Use the project's context-mode MCP tools when output may be large. Keep existing repository instructions and follow the user's current request. These model-side instructions do not prove that Codex hooks are enabled or trusted.
+Use the project's codex-context-mode MCP tools when output may be large. Keep existing repository instructions and follow the user's current request. These model-side instructions do not prove that Codex hooks are enabled or trusted.
 
 ## Choose the tool
 
@@ -12,7 +12,7 @@ Use the project's context-mode MCP tools when output may be large. Keep existing
 - Consume output already in context directly; do not index it again merely to summarize it.
 - Use the available browser tool's supported snapshot-saving API. Do not invent tool parameters or assume another browser client's capabilities.
 
-Use bounded native commands for small, predictable output. Use context-mode for tests, build output, logs and broad searches. A tool being available does not authorize network calls, destructive actions or publication.
+Use bounded native commands for small, predictable output. Use codex-context-mode for tests, build output, logs and broad searches. A tool being available does not authorize network calls, destructive actions or publication.
 
 ## Portability
 

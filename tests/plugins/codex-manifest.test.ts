@@ -7,6 +7,9 @@ describe("single Codex plugin contract", () => {
   it("has canonical identity and one host-policy-neutral local MCP", () => {
     const plugin = json(".codex-plugin/plugin.json"), pkg = json("package.json"), mcp = json(".mcp.json");
     expect(plugin.name).toBe("codex-context-mode"); expect(pkg.name).toBe(plugin.name);
+    expect(plugin.interface.displayName).toBe(plugin.name);
+    expect(plugin.author).toEqual({name: "hudrucan", url: "https://github.com/hudrucan"});
+    expect(plugin.interface.developerName).toBe("hudrucan");
     expect(plugin.version).toBe(pkg.version); expect(plugin.mcpServers).toBe("./.mcp.json");
     expect(plugin.hooks).toBe("./hooks/hooks.json"); expect(plugin.skills).toBe("./skills/");
     expect(Object.keys(mcp.mcpServers)).toEqual(["codex-context-mode"]);
@@ -32,6 +35,7 @@ describe("single Codex plugin contract", () => {
   });
   it("preserves attribution and excludes separate legacy installers", () => {
     expect(json("package.json").license).toBe("Elastic-2.0");
+    expect(json("package.json").author).toBe("Mert Koseoğlu");
     expect(readFileSync(resolve(root, "NOTICE"), "utf8")).toContain("Mert");
     for (const p of ["configs/codex/hooks.json", "configs/codex/config.toml", "scripts/postinstall.mjs", "hooks/ensure-deps.mjs"]) expect(existsSync(resolve(root, p))).toBe(false);
   });

@@ -1,10 +1,10 @@
 {
   "name": "codex-context-mode",
-  "version": "1.0.169",
+  "version": "0.1.0",
   "description": "Codex plugin for local execution, SQLite FTS5 search and session continuity.",
   "author": {
-    "name": "Mert Koseoğlu",
-    "url": "https://github.com/mksglu"
+    "name": "hudrucan",
+    "url": "https://github.com/hudrucan"
   },
   "homepage": "https://github.com/hudrucan/codex-context-mode#readme",
   "repository": "https://github.com/hudrucan/codex-context-mode",
@@ -24,9 +24,9 @@
   "hooks": "./hooks/hooks.json",
   "skills": "./skills/",
   "interface": {
-    "displayName": "Codex Context Mode",
+    "displayName": "codex-context-mode",
     "shortDescription": "Local execution, FTS5 search and session continuity",
-    "developerName": "Mert Koseoğlu",
+    "developerName": "hudrucan",
     "category": "Productivity"
   }
 }

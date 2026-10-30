@@ -1,9 +1,6 @@
 /**
  * Issue #5 + #8 (Layer 3) — extractUserPromptFeatures per §11.
  *
- * Reference: context-mode-platform/docs/prds/2026-06-insight-data-flow/
- *   11-multilingual-prompt-algorithm.md §11 Layer 1 + Layer 3
- *
  * The §11 spec mandates Unicode property regex (`\p{L}`, `\p{Lu}`,
  * `\p{Script=X}`) — script-agnostic, no per-language tables, no
  * franc/fasttext/compromise dependencies. Output is 10 numeric/string

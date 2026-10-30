@@ -1,6 +1,6 @@
 # Anti-Patterns: Common Mistakes with ctx_execute / ctx_execute_file
 
-Avoid these pitfalls when using context-mode tools.
+Avoid these pitfalls when using codex-context-mode tools.
 
 ---
 

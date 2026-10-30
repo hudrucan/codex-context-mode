@@ -275,7 +275,7 @@ async function main() {
   );
   console.log(
     "\u2551" +
-      "     Context Mode — Before vs After Comparison (Fixtures)      " +
+      "    codex-context-mode — Before vs After Comparison (Fixtures)    " +
       "\u2551",
   );
   console.log(

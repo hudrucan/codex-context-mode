@@ -1,8 +1,7 @@
 /**
  * parseCodexUsage / extractCodexUsageSince — Codex CLI per-turn token capture.
  *
- * Ground truth: context-mode-platform/docs/prds/2026-06-paid-observability/
- * adapter-matrix/codex.md (refs codex-rs protocol.rs). Codex carries per-turn
+ * Codex carries per-turn
  * usage on `EventMsg::TokenCount(TokenCountEvent)` (protocol.rs:1276), which is
  * ALSO persisted to the session rollout JSONL as a `type:"event_msg"` record
  * with `payload.type === "token_count"`. The payload mirrors TokenCountEvent:

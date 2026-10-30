@@ -20,6 +20,8 @@ const pkg = readJson("package.json");
 const entry = mcp?.mcpServers?.["codex-context-mode"];
 check(plugin?.name === "codex-context-mode", "Plugin name drift");
 check(pkg?.name === plugin?.name && pkg?.version === plugin?.version, "Package/plugin identity drift");
+check(plugin?.interface?.displayName === "codex-context-mode" && marketplace?.interface?.displayName === "codex-context-mode", "Product display name drift");
+check(marketplace?.name === "hudrucan", "Marketplace ID drift");
 check(Object.keys(mcp?.mcpServers ?? {}).length === 1, "Exactly one MCP required");
 check(entry?.default_tools_approval_mode === undefined, "Plugin must preserve host approval policy");
 check(JSON.stringify((existsSync(resolve(root, "skills")) ? readdirSync(resolve(root, "skills")) : []).filter(n => existsSync(resolve(root, "skills", n, "SKILL.md"))).sort()) === JSON.stringify(["doctor", "index", "main", "purge", "search", "stats"]), "Exactly six bundled skills required");

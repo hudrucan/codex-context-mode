@@ -1,9 +1,15 @@
 {
   "name": "codex-context-mode",
-  "version": "1.0.169",
+  "version": "0.1.0",
   "type": "module",
   "description": "Codex plugin for local execution, SQLite FTS5 search and session continuity.",
   "author": "Mert Koseoğlu",
+  "contributors": [
+    {
+      "name": "hudrucan",
+      "url": "https://github.com/hudrucan"
+    }
+  ],
   "license": "Elastic-2.0",
   "keywords": [
     "mcp",

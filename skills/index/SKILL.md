@@ -1,13 +1,13 @@
 ---
 name: index
 description: |
-  Index a local file or directory into context-mode's persistent FTS5 knowledge base
+  Index a local file or directory into codex-context-mode's persistent FTS5 knowledge base
   so future ctx_search calls can retrieve focused snippets without rereading raw files.
   Trigger: /codex-context-mode:index
 user-invocable: true
 ---
 
-# Context Mode Index
+# codex-context-mode index
 
 Index local project content for later search.
 

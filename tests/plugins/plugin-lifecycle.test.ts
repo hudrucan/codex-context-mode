@@ -78,7 +78,7 @@ describe.skipIf(!hasCodex)("native Codex plugin lifecycle (isolated host)", () =
   it("installs one offline plugin, reviews six hooks, preserves data across restart and uninstalls", async () => {
     const f = fixture();
     cli(f, ["plugin", "marketplace", "add", f.marketplace, "--json"]);
-    const added = cli(f, ["plugin", "add", "codex-context-mode@codex-context-mode", "--json"]);
+    const added = cli(f, ["plugin", "add", "codex-context-mode@hudrucan", "--json"]);
     const installed = added.installedPath;
     expect(installed).toContain(" ");
     expect(existsSync(join(installed, "node_modules"))).toBe(false);
@@ -166,14 +166,14 @@ describe.skipIf(!hasCodex)("native Codex plugin lifecycle (isolated host)", () =
     const disabled = appServer(f);
     try {
       await disabled.init();
-      await disabled.rpc("config/batchWrite", {edits:[{keyPath:'plugins."codex-context-mode@codex-context-mode".enabled',value:false,mergeStrategy:"upsert"}],reloadUserConfig:true});
+      await disabled.rpc("config/batchWrite", {edits:[{keyPath:'plugins."codex-context-mode@hudrucan".enabled',value:false,mergeStrategy:"upsert"}],reloadUserConfig:true});
     } finally { await disabled.close(); }
     const reenabled = appServer(f);
     try {
       await reenabled.init();
       expect((await reenabled.rpc("hooks/list", {cwds:[f.workspace]})).data[0].hooks.filter((h: any) => h.enabled)).toHaveLength(0);
       expect((await reenabled.rpc("mcpServerStatus/list", {})).data).toHaveLength(0);
-      await reenabled.rpc("config/batchWrite", {edits:[{keyPath:'plugins."codex-context-mode@codex-context-mode".enabled',value:true,mergeStrategy:"upsert"}],reloadUserConfig:true});
+      await reenabled.rpc("config/batchWrite", {edits:[{keyPath:'plugins."codex-context-mode@hudrucan".enabled',value:true,mergeStrategy:"upsert"}],reloadUserConfig:true});
     } finally { await reenabled.close(); }
     const updatedManifest = join(f.source, ".codex-plugin/plugin.json");
     const release = JSON.parse(readFileSync(updatedManifest, "utf8"));
@@ -183,7 +183,7 @@ describe.skipIf(!hasCodex)("native Codex plugin lifecycle (isolated host)", () =
     const hookDefs = JSON.parse(readFileSync(hookManifest, "utf8"));
     hookDefs.hooks.Stop[0].hooks[0].command += " --local-update";
     writeFileSync(hookManifest, JSON.stringify(hookDefs));
-    const updated = cli(f, ["plugin", "add", "codex-context-mode@codex-context-mode", "--json"]);
+    const updated = cli(f, ["plugin", "add", "codex-context-mode@hudrucan", "--json"]);
     expect(updated.version).toBe(release.version);
     const updatedHost = appServer(f);
     try {
@@ -199,7 +199,7 @@ describe.skipIf(!hasCodex)("native Codex plugin lifecycle (isolated host)", () =
     client = await mcp(f, updated.installedPath);
     try { expect(text(await client.callTool({name:"ctx_search",arguments:{queries:["PluginQuasarMarker"]}}))).toContain("PluginQuasarMarker"); }
     finally { await client.close(); }
-    cli(f, ["plugin", "remove", "codex-context-mode@codex-context-mode", "--json"]);
+    cli(f, ["plugin", "remove", "codex-context-mode@hudrucan", "--json"]);
     expect(cli(f, ["plugin", "list", "--json"]).installed).toHaveLength(0);
     expect(existsSync(updated.installedPath)).toBe(false);
     const uninstalled = appServer(f);

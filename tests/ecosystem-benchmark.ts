@@ -411,7 +411,7 @@ async function main() {
   );
   console.log(
     "\u2551" +
-      "   Context Mode — Ecosystem Benchmark (Real MCP & Skill Outputs)        " +
+      "   codex-context-mode — Ecosystem Benchmark (Real MCP & Skill Outputs)    " +
       "\u2551",
   );
   console.log(

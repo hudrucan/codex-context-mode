@@ -130,7 +130,7 @@ async function indexCommand(argv: string[]): Promise<number> {
     const parsed = parseFlags(argv);
     const target = parsed.positional[0];
     if (!target || target === "-h" || target === "--help") {
-      console.log("Usage: context-mode index <path> [--source label] [--project path] [--max-files n] [--max-depth n] [--ext .ts,.md]");
+      console.log("Usage: codex-context-mode index <path> [--source label] [--project path] [--max-files n] [--max-depth n] [--ext .ts,.md]");
       return target ? 0 : 1;
     }
 
@@ -184,7 +184,7 @@ async function indexCommand(argv: string[]): Promise<number> {
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`context-mode index: ${message}`);
+    console.error(`codex-context-mode index: ${message}`);
     return 1;
   }
 }
@@ -194,7 +194,7 @@ async function searchCommand(argv: string[]): Promise<number> {
     const parsed = parseFlags(argv);
     const query = parsed.positional.join(" ").trim();
     if (!query || query === "-h" || query === "--help") {
-      console.log("Usage: context-mode search <query...> [--source label] [--project path] [--limit n] [--type code|prose]");
+      console.log("Usage: codex-context-mode search <query...> [--source label] [--project path] [--limit n] [--type code|prose]");
       return query ? 0 : 1;
     }
 
@@ -232,7 +232,7 @@ async function searchCommand(argv: string[]): Promise<number> {
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`context-mode search: ${message}`);
+    console.error(`codex-context-mode search: ${message}`);
     return 1;
   }
 }

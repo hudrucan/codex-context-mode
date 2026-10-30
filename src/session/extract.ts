@@ -2251,18 +2251,13 @@ export function extractSessionSettings(input: unknown): SessionEvent[] {
 /**
  * §11 Layer 1 + Layer 3 — multilingual prompt features.
  *
- * Reference: context-mode-platform/docs/prds/2026-06-insight-data-flow/
- *   11-multilingual-prompt-algorithm.md
- *
  * Script-agnostic via Unicode property regex (`\p{L}`, `\p{Lu}`,
  * `\p{Script=X}`). No per-language tables, no franc/fasttext deps.
  * Layer 1 returns 10 numeric/string features; Layer 3 appends a
- * `prompt_word_tokens: string[]` array for the platform's streaming
- * word-frequency UPSERT.
+ * `prompt_word_tokens: string[]` array for local prompt analysis.
  *
  * Privacy: features carry no prose. Layer 3 tokens are deduped
- * letter-only words ≥3 chars; platform aggregates by (org_id, week,
- * word) so no individual token surfaces in UI.
+ * letter-only words ≥3 chars.
  */
 export interface PromptFeatures {
   prompt_length: number;
