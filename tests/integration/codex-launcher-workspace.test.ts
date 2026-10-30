@@ -37,9 +37,9 @@ afterAll(async () => {
 
 async function launch(
   overrides: Record<string, string> = {},
-  options: { clientName?: string; platform?: string | null } = {},
+  options: { clientName?: string; platform?: string | null; home?: string } = {},
 ) {
-  const home = mkdtempSync(join(root, "home-"));
+  const home = options.home ?? mkdtempSync(join(root, "home-"));
   const codexHome = join(home, "custom-codex-home");
   const sessions = join(codexHome, "sessions");
   mkdirSync(sessions, { recursive: true });
@@ -129,21 +129,26 @@ describe("Codex workspace routing through production start.mjs", () => {
     }
   });
 
-  it.each(["CONTEXT_MODE_DIR", "CODEX_CONTEXT_MODE_HOME"])("preserves %s across restart and concurrent repositories", async (key) => {
+  it.each(["default", "CODEX_CONTEXT_MODE_HOME"])("preserves %s storage across restart and concurrent repositories, ignoring CONTEXT_MODE_DIR", async (key) => {
+    const home = mkdtempSync(join(root, "home-"));
     const storage = mkdtempSync(join(root, "storage-"));
-    const overrides = { [key]: storage };
-    const first = await launch(overrides, { platform: null });
-    const expectedContent = key === "CODEX_CONTEXT_MODE_HOME"
-      ? join(storage, "data", "content") : join(storage, "content");
+    const legacyStorage = mkdtempSync(join(root, "legacy-storage-"));
+    const overrides: Record<string, string> = key === "CODEX_CONTEXT_MODE_HOME"
+      ? { CODEX_CONTEXT_MODE_HOME: storage, CONTEXT_MODE_DIR: legacyStorage }
+      : { CONTEXT_MODE_DIR: legacyStorage };
+    const first = await launch(overrides, { platform: null, home });
+    const expectedRoot = key === "CODEX_CONTEXT_MODE_HOME" ? storage : join(home, ".codex-context-mode");
+    const expectedContent = join(expectedRoot, "data", "content");
     for (const [threadId, repo, marker] of [[alpha, repoA, "ALPHA"], [beta, repoB, "BETA"]]) {
       const result = await first.callTool({ name: "ctx_index", _meta: { threadId }, arguments: { content: "StorageIsolation " + marker, source: "storage-fixture" } });
       expect(result.isError).not.toBe(true);
       const db = join(expectedContent, hashProjectDirCanonical(repo) + ".db");
       expect(readFileSync(db).subarray(0, 16).toString()).toBe("SQLite format 3\0");
     }
+    expect(readdirSync(legacyStorage)).toEqual([]);
     expect(existsSync(join(clientPaths.get(first)!.codexHome, "context-mode", "content"))).toBe(false);
     await first.close();
-    const resumed = await launch(overrides, { platform: null });
+    const resumed = await launch(overrides, { platform: null, home });
     const results = await Promise.all([alpha, beta].map(threadId => resumed.callTool({ name: "ctx_search", _meta: { threadId }, arguments: { queries: ["StorageIsolation"], source: "storage-fixture" } })));
     for (let i = 0; i < results.length; i++) {
       expect(results[i].isError).not.toBe(true);
@@ -151,6 +156,7 @@ describe("Codex workspace routing through production start.mjs", () => {
       expect(output).toContain(i === 0 ? "ALPHA" : "BETA");
       expect(output).not.toContain(i === 0 ? "BETA" : "ALPHA");
     }
+    expect(readdirSync(legacyStorage)).toEqual([]);
   });
 
   it("does not generate an upstream upgrade command through MCP", async () => {

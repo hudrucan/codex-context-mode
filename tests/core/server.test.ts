@@ -24,10 +24,10 @@ import {
   realpathSync,
 } from "node:fs";
 import { join, dirname, resolve } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { describe, test, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 
 import { classifyNonZeroExit } from "../../src/exit-classify.js";
 import { PolyglotExecutor } from "../../src/executor.js";
@@ -51,21 +51,28 @@ import { sanitizeSchemaForStrictClients, REGISTERED_CTX_TOOLS } from "../../src/
 // ─── Shared setup ───────────────────────────────────────────────────────────
 const runtimes = detectRuntimes();
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const STORAGE_ENV_KEY = "CONTEXT_MODE_DIR";
+const STORAGE_ENV_KEY = "CODEX_CONTEXT_MODE_HOME";
 const savedStorageEnv = process.env[STORAGE_ENV_KEY];
+const savedLegacyStorageEnv = process.env.CONTEXT_MODE_DIR;
 
 afterEach(() => {
   if (savedStorageEnv === undefined) delete process.env[STORAGE_ENV_KEY];
   else process.env[STORAGE_ENV_KEY] = savedStorageEnv;
+  if (savedLegacyStorageEnv === undefined) delete process.env.CONTEXT_MODE_DIR;
+  else process.env.CONTEXT_MODE_DIR = savedLegacyStorageEnv;
   clearStorageDirectoryCheckCacheForTests();
 });
 
 describe("storage path resolution", () => {
-  test("uses adapter defaults when no storage override is set", () => {
+  beforeEach(() => {
     delete process.env[STORAGE_ENV_KEY];
+    delete process.env.CONTEXT_MODE_DIR;
+  });
 
-    const defaultSessionsDir = join(tmpdir(), "context-mode-default", "sessions");
-    const defaultRoot = dirname(defaultSessionsDir);
+  test("uses the home runtime root when no storage override is set", () => {
+    const defaultRoot = join(homedir(), ".codex-context-mode", "data");
+    const defaultSessionsDir = resolveDefaultSessionDir({ configDir: ".ignored" });
+    expect(defaultSessionsDir).toBe(join(defaultRoot, "sessions"));
     const session = resolveSessionStorageDir(() => defaultSessionsDir);
     const content = resolveContentStorageDir(() => defaultSessionsDir);
     const stats = resolveStatsStorageDir(() => defaultSessionsDir);
@@ -84,7 +91,7 @@ describe("storage path resolution", () => {
     });
     expect(stats).toEqual({
       kind: "stats",
-      path: defaultSessionsDir,
+      path: join(defaultRoot, "stats"),
       envVar: null,
       source: "default",
     });
@@ -110,7 +117,7 @@ describe("storage path resolution", () => {
     ).toBe(runtimePaths().sessions);
   });
 
-  test("ignores legacy session hints and honors explicit test storage", () => {
+  test("ignores legacy storage and session hints and honors the supported override", () => {
     const legacyDir = join(tmpdir(), "context-mode-legacy-sessions");
     const root = resolve(tmpdir(), "context-mode-storage-root");
     const defaultDir = () => resolveDefaultSessionDir({
@@ -119,41 +126,53 @@ describe("storage path resolution", () => {
       env: { CONTEXT_MODE_TEST_SESSION_DIR: legacyDir },
     });
 
-    delete process.env[STORAGE_ENV_KEY];
-    expect(resolveSessionStorageDir(defaultDir).path).toBe(runtimePaths().sessions);
+    const defaultRoot = join(homedir(), ".codex-context-mode", "data");
+    for (const legacyValue of [legacyDir, "relative/path", " \t "]) {
+      process.env.CONTEXT_MODE_DIR = legacyValue;
+      for (const [resolver, subdir] of [
+        [resolveSessionStorageDir, "sessions"],
+        [resolveContentStorageDir, "content"],
+        [resolveStatsStorageDir, "stats"],
+      ] as const) {
+        expect(resolver(defaultDir)).toMatchObject({
+          path: join(defaultRoot, subdir), envVar: null, source: "default",
+        });
+      }
+    }
 
     process.env[STORAGE_ENV_KEY] = " \t ";
-    expect(resolveSessionStorageDir(defaultDir).path).toBe(runtimePaths().sessions);
+    expect(resolveSessionStorageDir(defaultDir).path).toBe(join(defaultRoot, "sessions"));
 
     process.env[STORAGE_ENV_KEY] = root;
-    expect(resolveSessionStorageDir(defaultDir).path).toBe(join(root, "sessions"));
+    expect(resolveSessionStorageDir(defaultDir).path).toBe(join(root, "data", "sessions"));
   });
 
-  test("uses CONTEXT_MODE_DIR as the single root for sessions, content, and stats", () => {
+  test("uses CODEX_CONTEXT_MODE_HOME as the single root despite a legacy override", () => {
     const root = resolve(tmpdir(), "context-mode-storage-root");
+    process.env.CONTEXT_MODE_DIR = resolve(tmpdir(), "context-mode-legacy-root");
     process.env[STORAGE_ENV_KEY] = root;
 
     expect(resolveSessionStorageDir(() => "/ignored")).toEqual({
       kind: "session",
-      path: join(root, "sessions"),
+      path: join(root, "data", "sessions"),
       envVar: STORAGE_ENV_KEY,
       source: "override",
     });
     expect(resolveContentStorageDir(() => "/ignored")).toEqual({
       kind: "content",
-      path: join(root, "content"),
+      path: join(root, "data", "content"),
       envVar: STORAGE_ENV_KEY,
       source: "override",
     });
     expect(resolveStatsStorageDir(() => "/ignored")).toEqual({
       kind: "stats",
-      path: join(root, "sessions"),
+      path: join(root, "data", "stats"),
       envVar: STORAGE_ENV_KEY,
       source: "override",
     });
   });
 
-  test("treats blank CONTEXT_MODE_DIR as default and reports ignored metadata", () => {
+  test("treats blank CODEX_CONTEXT_MODE_HOME as default and reports ignored metadata", () => {
     process.env[STORAGE_ENV_KEY] = " \t ";
     const defaultSessionsDir = join(tmpdir(), "context-mode-default", "sessions");
 
@@ -174,18 +193,18 @@ describe("storage path resolution", () => {
       ignoredEnvVar: STORAGE_ENV_KEY,
       ignoredReason: "empty",
     });
-    expect(describeStorageDirectorySource(session)).toBe("default; ignored empty CONTEXT_MODE_DIR");
+    expect(describeStorageDirectorySource(session)).toBe("default; ignored empty CODEX_CONTEXT_MODE_HOME");
 
     const err = new StorageDirectoryError("session", session.path, STORAGE_ENV_KEY, undefined, undefined, session);
-    expect(formatStorageDirectoryError(err)).toContain("Ignored empty CONTEXT_MODE_DIR; using adapter default.");
+    expect(formatStorageDirectoryError(err)).toContain("Ignored empty CODEX_CONTEXT_MODE_HOME; using adapter default.");
   });
 
-  test("rejects a relative CONTEXT_MODE_DIR", () => {
+  test("rejects a relative CODEX_CONTEXT_MODE_HOME", () => {
     process.env[STORAGE_ENV_KEY] = "relative/path";
 
     expect(() => resolveSessionStorageDir(() => "/ignored")).toThrow(StorageDirectoryError);
     expect(() => resolveSessionStorageDir(() => "/ignored")).toThrow(
-      "CONTEXT_MODE_DIR must be an absolute path.",
+      "CODEX_CONTEXT_MODE_HOME must be an absolute path.",
     );
   });
 
@@ -1566,7 +1585,7 @@ describe("ctx_index: Read deny-policy enforcement (#442)", () => {
     }
   }, 30_000);
 
-  test("ctx_index returns an actionable storage error when CONTEXT_MODE_DIR is unwritable", async () => {
+  test("ctx_index returns an actionable storage error when CODEX_CONTEXT_MODE_HOME is unwritable", async () => {
     if (process.platform === "win32") return;
 
     const projectDir = setupProject([], {
@@ -1575,7 +1594,7 @@ describe("ctx_index: Read deny-policy enforcement (#442)", () => {
     const storageRoot = mkdtempSync(join(tmpdir(), "ctx-storage-deny-"));
     chmodSync(storageRoot, 0o500);
     const proc = spawnServerInProject(projectDir, {
-      CONTEXT_MODE_DIR: storageRoot,
+      CODEX_CONTEXT_MODE_HOME: storageRoot,
     });
 
     try {
@@ -1594,7 +1613,7 @@ describe("ctx_index: Read deny-policy enforcement (#442)", () => {
         "context-mode content directory is not writable:",
       );
       expect(indexResp.result?.content?.[0]?.text).toContain(
-        "Set CONTEXT_MODE_DIR to a writable absolute path.",
+        "Set CODEX_CONTEXT_MODE_HOME to a writable absolute path.",
       );
     } finally {
       killProc(proc);
@@ -3758,7 +3777,7 @@ describe("ctx_doctor — resource cleanup regression (#247)", () => {
 
   test("ctx_doctor reports storage roots and ignored empty override", async () => {
     const storageRoot = mkdtempSync(join(tmpdir(), "ctx-doctor-storage-"));
-    const proc = startMcpServer({ CONTEXT_MODE_DIR: " \t ", HOME: storageRoot, USERPROFILE: storageRoot });
+    const proc = startMcpServer({ CODEX_CONTEXT_MODE_HOME: " \t ", HOME: storageRoot, USERPROFILE: storageRoot });
     const responses = await initAndCallDoctor(proc, 1);
     const call = responses.find((r) => r.id === 100);
 
@@ -3768,21 +3787,21 @@ describe("ctx_doctor — resource cleanup regression (#247)", () => {
     expect(text).toContain("Storage sessions:");
     expect(text).toContain("Storage content:");
     expect(text).toContain("Storage stats:");
-    expect(text).toContain("(default; ignored empty CONTEXT_MODE_DIR)");
+    expect(text).toContain("(default; ignored empty CODEX_CONTEXT_MODE_HOME)");
   }, 30_000);
 
   test("ctx_doctor reports storage root override source", async () => {
     const storageRoot = mkdtempSync(join(tmpdir(), "ctx-doctor-storage-root-"));
-    const proc = startMcpServer({ CONTEXT_MODE_DIR: storageRoot });
+    const proc = startMcpServer({ CODEX_CONTEXT_MODE_HOME: storageRoot });
     const responses = await initAndCallDoctor(proc, 1);
     const call = responses.find((r) => r.id === 100);
 
     expect(call).toBeDefined();
     expect(call!.error).toBeUndefined();
     const text = call!.result?.content?.[0]?.text ?? "";
-    expect(text).toContain(`Storage sessions: ${join(storageRoot, "sessions")} (via CONTEXT_MODE_DIR)`);
-    expect(text).toContain(`Storage content: ${join(storageRoot, "content")} (via CONTEXT_MODE_DIR)`);
-    expect(text).toContain(`Storage stats: ${join(storageRoot, "sessions")} (via CONTEXT_MODE_DIR)`);
+    expect(text).toContain(`Storage sessions: ${join(storageRoot, "data", "sessions")} (via CODEX_CONTEXT_MODE_HOME)`);
+    expect(text).toContain(`Storage content: ${join(storageRoot, "data", "content")} (via CODEX_CONTEXT_MODE_HOME)`);
+    expect(text).toContain(`Storage stats: ${join(storageRoot, "data", "stats")} (via CODEX_CONTEXT_MODE_HOME)`);
   }, 30_000);
 
   test("three concurrent ctx_doctor calls all succeed without crashing the server", async () => {
