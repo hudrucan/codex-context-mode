@@ -2990,7 +2990,7 @@ describe("runBatchCommands edge cases", () => {
 
   test("buildBatchNodeOptionsPrefix formats POSIX shell assignment", () => {
     const prefix = buildBatchNodeOptionsPrefix("bash", "/tmp/cm fs'preload.js");
-    expect(prefix).toBe("NODE_OPTIONS='--require /tmp/cm fs'\\''preload.js' ");
+    expect(prefix).toBe("NODE_OPTIONS='--require \"/tmp/cm fs'\\''preload.js\"' ");
   });
 
   test("buildBatchNodeOptionsPrefix formats PowerShell assignment", () => {
@@ -2998,7 +2998,7 @@ describe("runBatchCommands edge cases", () => {
       "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
       "C:\\Temp\\cm ' fs.js",
     );
-    expect(prefix).toBe("$env:NODE_OPTIONS='--require C:\\Temp\\cm '' fs.js'; ");
+    expect(prefix).toBe(String.raw`$env:NODE_OPTIONS='--require "C:\\Temp\\cm '' fs.js"'; `);
   });
 
   test("buildBatchNodeOptionsPrefix formats cmd assignment", () => {
@@ -3006,8 +3006,55 @@ describe("runBatchCommands edge cases", () => {
       "C:\\Windows\\System32\\cmd.exe",
       "C:\\Temp\\cm-fs-preload.js",
     );
-    expect(prefix).toBe('set "NODE_OPTIONS=--require C:\\Temp\\cm-fs-preload.js" && ');
+    expect(prefix).toBe(String.raw`set NODE_OPTIONS=--require ^"C:\\Temp\\cm-fs-preload.js^"&& `);
   });
+});
+
+describe("batch Node preload paths", () => {
+  const shells = process.platform === "win32"
+    ? [...new Set([
+      join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+      join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe"),
+      runtimes.shell,
+    ])]
+    : [...new Set(["/bin/sh", runtimes.shell])];
+
+  for (const shell of shells) {
+    test.each([1, 2])(`${shell} loads a spaced preload in Node test workers (concurrency=%i)`, async concurrency => {
+      const root = mkdtempSync(join(tmpdir(), "ctx batch ' runtime "));
+      const preload = join(root, "cm fs'preload & marker^%NO_BATCH_EXPANSION%.cjs");
+      const fixture = join(root, "preload.test.cjs");
+      try {
+        writeFileSync(preload, "globalThis.__batchPreloadMarker = 'loaded';\n");
+        writeFileSync(fixture, `
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+test('batch preload reaches test workers', () => {
+  assert.equal(globalThis.__batchPreloadMarker, 'loaded');
+});
+`);
+        const powershell = /powershell|pwsh/i.test(shell);
+        const cmd = /(?:^|[\\/])cmd(?:\.exe)?$/i.test(shell);
+        const quote = (value: string) => cmd ? '"' + value + '"' : "'" + value.replace(/'/g, powershell ? "''" : "'\\''") + "'";
+        const command = (powershell ? "& " : "") + quote(process.execPath) + " --test --test-reporter=tap " + quote(fixture);
+        const executor = new PolyglotExecutor({runtimes: {...runtimes, shell}, projectRoot: root});
+        const result = await runBatchCommands(
+          [{label: "first Node test", command}, {label: "second Node test", command}],
+          {timeout: 15_000, concurrency, nodeOptsPrefix: buildBatchNodeOptionsPrefix(shell, preload), cwd: root},
+          executor,
+        );
+        expect(result.timedOut).toBe(false);
+        expect(result.outputs).toHaveLength(2);
+        for (const output of result.outputs) {
+          expect(output).toContain("# pass 1");
+          expect(output).toContain("# fail 0");
+          expect(output).not.toContain("Cannot find module");
+        }
+      } finally {
+        rmSync(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 100});
+      }
+    });
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

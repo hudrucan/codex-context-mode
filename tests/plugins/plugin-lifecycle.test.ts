@@ -142,6 +142,13 @@ describe.skipIf(!hasCodex)("native Codex plugin lifecycle (isolated host)", () =
       expect(text(await client.callTool({ name: "ctx_doctor", arguments: {} }))).not.toContain("[FAIL]");
       expect((await client.callTool({ name: "ctx_stats", arguments: {} })).isError).not.toBe(true);
       expect(text(await client.callTool({ name: "ctx_execute", arguments: { language: "javascript", code: 'console.log("OfflineExecutionMarker")' } }))).toContain("OfflineExecutionMarker");
+      const batch = await client.callTool({ name: "ctx_batch_execute", arguments: {
+        commands: [{label: "bundled Node preload", command: 'node -e "console.log(42424201)"'}],
+        queries: ["42424201"], cwd: f.workspace,
+      } });
+      expect(batch.isError).not.toBe(true);
+      expect(text(batch)).toMatch(/\r?\n42424201\r?\n/);
+      expect(text(batch)).not.toContain("Cannot find module");
     } finally { await client.close(); }
     client = await mcp(f, installed);
     try { expect(text(await client.callTool({ name: "ctx_search", arguments: { queries: ["PluginQuasarMarker"] } }))).toContain("PluginQuasarMarker"); }

@@ -1065,7 +1065,8 @@ function quotePowerShellSingle(value: string): string {
 }
 
 export function buildBatchNodeOptionsPrefix(shellPath: string, preloadPath: string): string {
-  const option = `--require ${preloadPath}`;
+  // Node parses NODE_OPTIONS again after the shell, so quote the path at both layers.
+  const option = `--require ${JSON.stringify(preloadPath)}`;
   const shell = shellPath.toLowerCase();
   const base = shell.split(/[\\/]/).pop() ?? shell;
 
@@ -1074,7 +1075,10 @@ export function buildBatchNodeOptionsPrefix(shellPath: string, preloadPath: stri
   }
 
   if (base === "cmd" || base === "cmd.exe") {
-    return `set "NODE_OPTIONS=${option.replace(/"/g, '""')}" && `;
+    // These prefixes run in .cmd files. Preserve Node's quotes without exposing
+    // path metacharacters to CMD, and avoid a trailing space in the env value.
+    const escaped = option.replace(/%/g, "%%").replace(/[&|<>()^"]/g, "^$&");
+    return `set NODE_OPTIONS=${escaped}&& `;
   }
 
   return `NODE_OPTIONS=${quotePosixSingle(option)} `;
