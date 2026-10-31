@@ -11,7 +11,7 @@
  *                     reasoning_output_tokens, total_tokens } (protocol.rs:2000).
  *
  * These tests pin (1) the incremental `last_token_usage` mapping (NOT the
- * cumulative `total_token_usage`), (2) reasoning folded into output, (3)
+ * cumulative `total_token_usage`), (2) reasoning already included in output, (3)
  * cached_input_tokens → cache_read, (4) info:null skip (session ping / aborted
  * turn), and (5) the cursor-gated, per-model, no-double-count rollout walk.
  * The rollout-line fixtures are byte-shaped from real ~/.codex rollout files.
@@ -60,7 +60,7 @@ describe("parseCodexUsage", () => {
     const counts = parseCodexUsage(
       tokenCount({
         input_tokens: 1200,
-        cached_input_tokens: 4096,
+        cached_input_tokens: 400,
         output_tokens: 340,
         reasoning_output_tokens: 60,
       }),
@@ -68,11 +68,14 @@ describe("parseCodexUsage", () => {
     );
     expect(counts).toEqual({
       model_id: "gpt-5.5",
-      input_tokens: 1200,
-      output_tokens: 400, // 340 output + 60 reasoning (reasoning billed as output)
+      input_tokens: 800,
+      output_tokens: 340,
       cache_creation_tokens: 0,
-      cache_read_tokens: 4096, // cached_input_tokens -> cache_read
+      cache_read_tokens: 400,
       native_cost_usd: null,
+      raw_usage: { input_tokens: 1200, cached_input_tokens: 400,
+        cache_write_input_tokens: 0, output_tokens: 340,
+        reasoning_output_tokens: 60, total_tokens: 0 },
     });
   });
 
@@ -97,6 +100,30 @@ describe("parseCodexUsage", () => {
     expect(parseCodexUsage(tokenCount({}), "gpt-5.5")).toBeNull();
   });
 
+  it("prices inclusive input/output once and retains raw provider details", () => {
+    const payload = tokenCount({ input_tokens: 1000, cached_input_tokens: 600,
+      output_tokens: 200, reasoning_output_tokens: 150, total_tokens: 1200 });
+    const counts = parseCodexUsage(payload, "gpt-5")!;
+    expect(counts.input_tokens).toBe(400);
+    expect(counts.output_tokens).toBe(200);
+    expect(counts.raw_usage.reasoning_output_tokens).toBe(150);
+    const event = extractCodexUsageSince([
+      line("turn_context", { model: "gpt-5" }), line("event_msg", payload),
+    ].join("\n"), null).events[0];
+    expect(event.cost_usd).toBeCloseTo(0.002575, 12);
+    expect(event.data).toContain('raw_usage:{"input_tokens":1000');
+  });
+
+  it("partitions cache-write details without changing the inclusive raw count", () => {
+    const counts = parseCodexUsage(tokenCount({ input_tokens: 1000,
+      cached_input_tokens: 500, cache_write_input_tokens: 200, output_tokens: 20 }), "gpt-5")!;
+    expect([counts.input_tokens, counts.cache_read_tokens, counts.cache_creation_tokens]).toEqual([300, 500, 200]);
+    expect(counts.raw_usage.input_tokens).toBe(1000);
+    expect(counts.raw_usage.cache_write_input_tokens).toBe(200);
+    expect(parseCodexUsage(tokenCount({ input_tokens: 100, cached_input_tokens: 900,
+      cache_write_input_tokens: 200 }), "gpt-5")?.input_tokens).toBe(0);
+  });
+
   it("rejects non-token_count payloads and non-objects", () => {
     expect(parseCodexUsage({ type: "agent_message" }, "gpt-5.5")).toBeNull();
     expect(parseCodexUsage(null, "gpt-5.5")).toBeNull();
@@ -105,6 +132,16 @@ describe("parseCodexUsage", () => {
 });
 
 describe("extractCodexUsageSince", () => {
+  it("does not discard distinct records just because their last usage is equal", () => {
+    const usage = { input_tokens: 10, output_tokens: 2 };
+    const { events } = extractCodexUsageSince([
+      line("turn_context", { model: "gpt-5" }),
+      line("event_msg", tokenCount(usage, { input_tokens: 10, output_tokens: 2 })),
+      line("event_msg", tokenCount(usage, { input_tokens: 20, output_tokens: 4 })),
+    ].join("\n"), null);
+    expect(events[0].input_tokens).toBe(20);
+    expect(events[0].output_tokens).toBe(4);
+  });
   it("sums new completed turns since cursor and resolves model from turn_context", () => {
     const rollout = [
       line("session_meta", { id: "abc", model: "gpt-5.0" }),
@@ -118,9 +155,9 @@ describe("extractCodexUsageSince", () => {
     expect(events).toHaveLength(1);
     const ev = events[0];
     expect(ev.type).toBe("agent_usage");
-    // input 100+200=300, output (20+10)+30=60, cache_read 0+50=50
-    expect(ev.data).toContain("tokens_in:300");
-    expect(ev.data).toContain("tokens_out:60");
+    // Input totals include cache-read; reasoning is already in output.
+    expect(ev.data).toContain("tokens_in:250");
+    expect(ev.data).toContain("tokens_out:50");
     expect(ev.data).toContain("cache_read:50");
     // cursor = index of the last parseable line (5 lines, idx 0..4) = "4"
     expect(cursor).toBe("4");

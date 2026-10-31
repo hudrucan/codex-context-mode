@@ -1,63 +1,15 @@
 /**
- * adapters/codex/usage — Codex CLI per-turn token + cost capture.
+ * Codex 0.164.0 usage from rollout token_count records.
  *
- * ── Feasibility (verified empirically against live rollout files) ───────────
- * Codex persists a SESSION ROLLOUT transcript at
- *   $CODEX_HOME/sessions/YYYY/MM/DD/rollout-<ts>-<session_id>.jsonl
- * (default $CODEX_HOME = ~/.codex). Each line is a JSON record
- *   { timestamp, type, payload }
- * with `type` ∈ { session_meta, turn_context, response_item, event_msg }.
+ * Responses input/output totals already include cached/reasoning details.
+ * parseCodexUsage returns disjoint pricing buckets and the inclusive provider
+ * counters separately. Cache-write details also come from inclusive input.
+ * See codex-rs/codex-api/src/sse/responses.rs and protocol/src/protocol.rs at
+ * tag rust-v0.164.0. No shared adapter/pricing semantics are changed here.
  *
- * The adapter-matrix (docs/prds/2026-06-paid-observability/adapter-matrix/
- * codex.md) correctly notes that token usage is carried by
- * `EventMsg::TokenCount(TokenCountEvent)` (codex-rs protocol.rs:1276) and is
- * NOT on any hook payload (hooks carry `model` only). What the matrix does not
- * state — and what makes a file-tail feasible — is that codex ALSO PERSISTS
- * those EventMsgs to the rollout JSONL as `type:"event_msg"` records. The
- * `token_count` payload mirrors `TokenCountEvent` 1:1:
- *
- *   {
- *     "type": "event_msg",
- *     "payload": {
- *       "type": "token_count",
- *       "info": null | {                       // Option<TokenUsageInfo>
- *         "total_token_usage": TokenUsage,      // CUMULATIVE session sum (protocol.rs:2015)
- *         "last_token_usage":  TokenUsage,      // INCREMENTAL last turn  (protocol.rs:2016)
- *         "model_context_window": number | null
- *       },
- *       "rate_limits": { ... }
- *     }
- *   }
- *
- * where TokenUsage (protocol.rs:2000) is the full OpenAI usage shape:
- *   { input_tokens, cached_input_tokens, output_tokens,
- *     reasoning_output_tokens, total_tokens }.
- *
- * `info` is `null` until a turn COMPLETES (the initial session-start
- * token_count and any turn that is interrupted/aborted carry `info:null`);
- * a completed turn carries a populated `info`. We therefore read
- * `info.last_token_usage` and SKIP records whose `info` is null.
- *
- * ── Incremental vs Cumulative (protocol.rs:2049-2052) ───────────────────────
- *   append_last_usage():  total += last  (cumulative);  last = last (incremental)
- * We use `last_token_usage` as the per-turn delta — summing it across the new
- * turns since the cursor gives the exact NEW spend, with no double-count. We
- * deliberately do NOT use `total_token_usage` (it is the running cumulative sum
- * and would re-count every prior turn on each read).
- *
- * ── Field mapping (codex TokenUsage → AgentUsageCounts) ─────────────────────
- *   input_tokens             → input_tokens
- *   cached_input_tokens      → cache_read_tokens          (== OpenAI cached_tokens)
- *   output_tokens + reasoning_output_tokens → output_tokens
- *                              (reasoning is billed as output; fold it in)
- *   model_id: from the most recent turn_context.model (protocol.rs:1977 /
- *             ThreadSettingsSnapshot.model), falling back to session_meta.model
- *             when no turn_context precedes the event.
- *
- * Codex carries NO native USD on the rollout — cost is derived downstream by
- * buildAgentUsageEvent's pricing catalog (native_cost_usd omitted).
- *
- * Pure, null-safe, algorithmic. NO regex.
+ * last_token_usage is a response delta, not proof of a newly completed turn:
+ * repeated token_count snapshots require separate semantic investigation.
+ * The legacy extractor below gates physical lines, not equal token amounts.
  */
 
 import {
@@ -65,10 +17,26 @@ import {
   type SessionEvent,
   buildAgentUsageEvent,
 } from "../../session/extract.js";
+import { readCodexRollout, codexUsageSnapshot } from "./rollout.js";
+export { findCodexRollout } from "./rollout.js";
 
 /** Codex incremental TokenUsage (protocol.rs:2000). All fields optional/defensive. */
 function toNum(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+
+/** Inclusive provider counters, kept separate from the disjoint pricing buckets. */
+export interface CodexRawUsage {
+  input_tokens: number;
+  cached_input_tokens: number;
+  cache_write_input_tokens: number;
+  output_tokens: number;
+  reasoning_output_tokens: number;
+  total_tokens: number;
+}
+
+export interface CodexUsageCounts extends AgentUsageCounts {
+  raw_usage: CodexRawUsage;
 }
 
 /**
@@ -86,7 +54,7 @@ function toNum(v: unknown): number {
 export function parseCodexUsage(
   payload: unknown,
   modelId: string,
-): AgentUsageCounts | null {
+): CodexUsageCounts | null {
   if (!payload || typeof payload !== "object") return null;
   const p = payload as Record<string, unknown>;
   if (typeof p.type === "string" && p.type !== "token_count") return null;
@@ -97,20 +65,29 @@ export function parseCodexUsage(
   if (!last || typeof last !== "object") return null;
   const u = last as Record<string, unknown>;
 
-  const input_tokens = toNum(u.input_tokens);
-  // OpenAI cached_tokens == codex cached_input_tokens == our cache-read bucket.
-  const cache_read_tokens = toNum(u.cached_input_tokens);
-  // reasoning is billed as output → fold reasoning_output_tokens into output.
-  const output_tokens = toNum(u.output_tokens) + toNum(u.reasoning_output_tokens);
-
-  // Codex has no separate cache-CREATION bucket (cached_input_tokens is a read
-  // hit count, not a write). Leave cache_creation_tokens at 0.
-  const cache_creation_tokens = 0;
+  const raw_usage: CodexRawUsage = {
+    input_tokens: toNum(u.input_tokens),
+    cached_input_tokens: toNum(u.cached_input_tokens),
+    cache_write_input_tokens: toNum(u.cache_write_input_tokens),
+    output_tokens: toNum(u.output_tokens),
+    reasoning_output_tokens: toNum(u.reasoning_output_tokens),
+    total_tokens: toNum(u.total_tokens),
+  };
+  // Codex 0.164.0 copies inclusive Responses usage plus its input/output
+  // details. Reasoning is already in output. Split input exactly once across
+  // uncached, cache-read and cache-write buckets; unknown write rates fall back
+  // to the input rate in the shared catalog. Other adapters are unchanged.
+  const input = Math.max(0, raw_usage.input_tokens);
+  const cache_read_tokens = Math.min(input, Math.max(0, raw_usage.cached_input_tokens));
+  const cache_creation_tokens = Math.min(input - cache_read_tokens, Math.max(0, raw_usage.cache_write_input_tokens));
+  const input_tokens = input - cache_read_tokens - cache_creation_tokens;
+  const output_tokens = Math.max(0, raw_usage.output_tokens);
 
   if (
     input_tokens <= 0 &&
     output_tokens <= 0 &&
-    cache_read_tokens <= 0
+    cache_read_tokens <= 0 &&
+    cache_creation_tokens <= 0
   ) {
     return null;
   }
@@ -122,6 +99,7 @@ export function parseCodexUsage(
     cache_creation_tokens,
     cache_read_tokens,
     native_cost_usd: null, // codex rollout carries no native USD; catalog derives
+    raw_usage,
   };
 }
 
@@ -153,100 +131,60 @@ export function parseCodexUsage(
  * unparseable, the input cursor is returned unchanged. Same linear JSONL walk,
  * JSON.parse per line, NO regex.
  */
+function buildCodexUsageEvents(records: Array<{ payload: unknown; model: string }>): SessionEvent[] {
+  const sums = new Map<string, CodexUsageCounts>();
+  for (const record of records) {
+    const counts = parseCodexUsage(record.payload, record.model);
+    if (!counts) continue;
+    const sum = sums.get(record.model);
+    if (!sum) { sums.set(record.model, counts); continue; }
+    sum.input_tokens += counts.input_tokens;
+    sum.output_tokens += counts.output_tokens;
+    sum.cache_read_tokens += counts.cache_read_tokens;
+    sum.cache_creation_tokens += counts.cache_creation_tokens;
+    for (const field of Object.keys(sum.raw_usage) as Array<keyof CodexRawUsage>) {
+      sum.raw_usage[field] += counts.raw_usage[field];
+    }
+  }
+  const events: SessionEvent[] = [];
+  for (const sum of sums.values()) {
+    const event = buildAgentUsageEvent(sum);
+    if (event) {
+      event.data += ` model_id:${JSON.stringify(sum.model_id)} raw_usage:${JSON.stringify(sum.raw_usage)}`;
+      events.push(event);
+    }
+  }
+  return events;
+}
+
 export function extractCodexUsageSince(
   rollout: string,
   sinceCursor: string | null,
 ): { events: SessionEvent[]; cursor: string | null } {
-  const inputCursor =
-    typeof sinceCursor === "string" && sinceCursor.length > 0 ? sinceCursor : null;
-
-  if (typeof rollout !== "string" || rollout.length === 0) {
-    return { events: [], cursor: inputCursor };
-  }
-
-  // Parse the cursor as a line-index high-water mark. NaN/garbage → process all.
-  let sinceIdx = -1;
-  if (inputCursor !== null) {
-    const parsed = Number.parseInt(inputCursor, 10);
-    if (Number.isInteger(parsed) && parsed >= 0) sinceIdx = parsed;
-  }
-
-  // Split into physical lines. A trailing newline yields a final empty line we
-  // skip; the surviving line index is preserved so the cursor stays stable.
-  const lines = rollout.split("\n");
-
-  let currentModel = "";
-  let lastLineIdx = -1; // last NON-EMPTY parseable line index (the new cursor)
-  // Per-model sums over the NEW slice.
-  const sums = new Map<
-    string,
-    { input: number; output: number; cacheRead: number }
-  >();
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.length === 0) continue;
-    let obj: unknown;
-    try {
-      obj = JSON.parse(line);
-    } catch {
-      continue; // tolerate a partially-flushed final line
+  if (typeof rollout !== "string" || !rollout) return { events: [], cursor: sinceCursor };
+  const since = sinceCursor === null ? -1 : Number.parseInt(sinceCursor, 10);
+  let model = "";
+  let last = -1;
+  let lastUsageSnapshot: string | undefined;
+  const records: Array<{ payload: unknown; model: string }> = [];
+  for (const [i, line] of rollout.split("\n").entries()) {
+    let rec;
+    try { rec = JSON.parse(line); } catch { continue; }
+    if (!rec || typeof rec !== "object") continue;
+    last = i;
+    if ((rec.type === "turn_context" || rec.type === "session_meta") &&
+        typeof rec.payload?.model === "string" && rec.payload.model.length > 0) model = rec.payload.model;
+    if (rec.type === "event_msg" && rec.payload?.type === "token_count") {
+      const snapshot = codexUsageSnapshot(rec.payload);
+      if (!(i <= since) && (!snapshot || snapshot !== lastUsageSnapshot)) records.push({ payload: rec.payload, model });
+      if (snapshot) lastUsageSnapshot = snapshot;
     }
-    if (!obj || typeof obj !== "object") continue;
-    lastLineIdx = i;
-
-    const rec = obj as Record<string, unknown>;
-    const recType = typeof rec.type === "string" ? rec.type : "";
-    const payload =
-      rec.payload && typeof rec.payload === "object"
-        ? (rec.payload as Record<string, unknown>)
-        : null;
-
-    // Track model from the most recent turn_context / session_meta.
-    if (recType === "turn_context" && payload) {
-      const m = payload.model;
-      if (typeof m === "string" && m.length > 0) currentModel = m;
-      continue;
-    }
-    if (recType === "session_meta" && payload) {
-      const m = payload.model;
-      if (typeof m === "string" && m.length > 0) currentModel = m;
-      continue;
-    }
-
-    if (recType !== "event_msg" || !payload) continue;
-    if (payload.type !== "token_count") continue;
-
-    // Cursor gate: only token_count records strictly past the high-water mark.
-    if (i <= sinceIdx) continue;
-
-    const counts = parseCodexUsage(payload, currentModel);
-    if (!counts) continue; // info:null (session ping / aborted) or zero usage
-
-    const key = counts.model_id;
-    const cur = sums.get(key) ?? { input: 0, output: 0, cacheRead: 0 };
-    cur.input += counts.input_tokens;
-    cur.output += counts.output_tokens;
-    cur.cacheRead += counts.cache_read_tokens;
-    sums.set(key, cur);
   }
+  return { events: buildCodexUsageEvents(records), cursor: last < 0 ? sinceCursor : String(last) };
+}
 
-  // Cursor advances to the last parseable line regardless of whether it carried
-  // usage, so we never re-scan settled lines next Stop. If nothing parsed, hold
-  // the input cursor.
-  const cursor = lastLineIdx >= 0 ? String(lastLineIdx) : inputCursor;
-
-  const events: SessionEvent[] = [];
-  for (const [model, s] of sums) {
-    const ev = buildAgentUsageEvent({
-      model_id: model,
-      input_tokens: s.input,
-      output_tokens: s.output,
-      cache_creation_tokens: 0,
-      cache_read_tokens: s.cacheRead,
-    });
-    if (ev) events.push(ev);
-  }
-
-  return { events, cursor };
+/** Bounded byte-offset reader used by the native Stop hook. */
+export function readCodexUsageIncremental(path: string, cursor: string | null) {
+  const result = readCodexRollout(path, cursor);
+  return { events: buildCodexUsageEvents(result.records), cursor: result.cursor, bytesRead: result.bytesRead };
 }

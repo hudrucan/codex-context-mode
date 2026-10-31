@@ -290,6 +290,24 @@ export function normalizeWorktreePath(path: string): string {
   return normalized.replace(/\/+$/, "");
 }
 
+function canonicalProjectPath(path: string): string {
+  const normalized = normalizeWorktreePath(path);
+  return process.platform === "win32" || process.platform === "darwin"
+    ? normalized.toLowerCase() : normalized;
+}
+
+// Apply the existing path shape to historical rows at read time. Preserve
+// filesystem roots and compare exact directories, never path prefixes.
+const slashProjectPathSQL = "REPLACE(project_dir, '\\', '/')";
+const normalizedProjectPathSQL = `CASE
+  WHEN RTRIM(${slashProjectPathSQL}, '/') = '' AND project_dir <> '' THEN '/'
+  WHEN LENGTH(RTRIM(${slashProjectPathSQL}, '/')) = 2
+    AND SUBSTR(${slashProjectPathSQL}, 2, 2) = ':/'
+    THEN SUBSTR(${slashProjectPathSQL}, 1, 2) || '/'
+  ELSE RTRIM(${slashProjectPathSQL}, '/') END`;
+const canonicalProjectPathSQL = process.platform === "win32" || process.platform === "darwin"
+  ? `LOWER(${normalizedProjectPathSQL})` : normalizedProjectPathSQL;
+
 // Case-insensitive filesystems (macOS HFS+/APFS default, Windows NTFS default)
 // can report `currentRoot` and `mainRoot` with different casing for the same
 // physical directory — git itself sometimes preserves the on-disk casing while
@@ -404,11 +422,7 @@ export function hashProjectDirLegacy(projectDir: string): string {
  *   <baseHash><worktreeSuffix>.db
  */
 export function hashProjectDirCanonical(projectDir: string): string {
-  const normalized = normalizeWorktreePath(projectDir);
-  const folded = (process.platform === "darwin" || process.platform === "win32")
-    ? normalized.toLowerCase()
-    : normalized;
-  return createHash("sha256").update(folded).digest("hex").slice(0, 16);
+  return createHash("sha256").update(canonicalProjectPath(projectDir)).digest("hex").slice(0, 16);
 }
 
 /** Canonical content DB path; no storage migration. */
@@ -557,6 +571,7 @@ const S = {
   incrementCompactCount: "incrementCompactCount",
   getUsageCursor: "getUsageCursor",
   setUsageCursor: "setUsageCursor",
+  compareUsageCursor: "compareUsageCursor",
   upsertResume: "upsertResume",
   getResume: "getResume",
   markResumeConsumed: "markResumeConsumed",
@@ -921,6 +936,9 @@ export class SessionDB extends SQLiteBase {
     p(S.setUsageCursor,
       `UPDATE session_meta SET usage_cursor = ? WHERE session_id = ?`);
 
+    p(S.compareUsageCursor,
+      `UPDATE session_meta SET usage_cursor = ? WHERE session_id = ? AND usage_cursor IS ?`);
+
     // ── Resume ──
     p(S.upsertResume,
       `INSERT INTO session_resume (session_id, snapshot, event_count)
@@ -967,7 +985,7 @@ export class SessionDB extends SQLiteBase {
     p(S.searchEvents,
       `SELECT id, session_id, category, type, data, created_at
        FROM session_events
-       WHERE (project_dir = ? OR project_dir = '')
+       WHERE (${canonicalProjectPathSQL} = ? OR project_dir = '')
          AND (data LIKE '%' || ? || '%' ESCAPE '\\' OR category LIKE '%' || ? || '%' ESCAPE '\\')
          AND (? IS NULL OR category = ?)
        ORDER BY id ASC
@@ -1102,12 +1120,16 @@ export class SessionDB extends SQLiteBase {
     sourceHook: string = "PostToolUse",
     attributions?: Array<Partial<ProjectAttribution> | undefined>,
     bytesList?: Array<EventBytes | undefined>,
-  ): void {
-    if (!events || events.length === 0) return;
-    if (events.length === 1) {
+    usageCursor?: { expected: string | null; next: string },
+  ): boolean {
+    if (usageCursor && usageCursor.next === usageCursor.expected && events.length > 0) {
+      throw new Error("Usage cursor must advance before inserting usage");
+    }
+    if ((!events || events.length === 0) && !usageCursor) return true;
+    if (events.length === 1 && !usageCursor) {
       // Cheaper to fall through to insertEvent (its own dedicated transaction).
       this.insertEvent(sessionId, events[0], sourceHook, attributions?.[0], bytesList?.[0]);
-      return;
+      return true;
     }
 
     // Pre-compute hashes + normalized attribution outside the transaction
@@ -1151,9 +1173,16 @@ export class SessionDB extends SQLiteBase {
     });
 
     const transaction = this.db.transaction(() => {
+      // First statement is a write: SQLite serializes competing Stop commits.
+      // On a stale cursor nothing is inserted. Any subsequent failure rolls
+      // back both usage and cursor; there is no nested transaction.
+      if (usageCursor) {
+        const result = this.stmt(S.compareUsageCursor).run(usageCursor.next, sessionId, usageCursor.expected);
+        if (result.changes !== 1) return false;
+      }
       let cnt = (this.stmt(S.getEventCount).get(sessionId) as { cnt: number }).cnt;
       for (const row of prepared) {
-        const dup = this.stmt(S.checkDuplicate).get(
+        const dup = !usageCursor && this.stmt(S.checkDuplicate).get(
           sessionId, DEDUP_WINDOW, row.event.type, row.dataHash,
         );
         if (dup) continue;
@@ -1177,10 +1206,11 @@ export class SessionDB extends SQLiteBase {
           row.dataHash,
         );
       }
-      this.stmt(S.updateMetaLastEvent).run(sessionId);
+      if (prepared.length > 0) this.stmt(S.updateMetaLastEvent).run(sessionId);
+      return true;
     });
 
-    this.withRetry(() => transaction());
+    return this.withRetry(() => transaction());
   }
 
   /**
@@ -1280,8 +1310,18 @@ export class SessionDB extends SQLiteBase {
     try {
       const escapedQuery = query.replace(/[%_]/g, (char) => "\\" + char);
       const sourceParam = source ?? null;
+      // SQLite LOWER only folds ASCII. Use the same JS canonicalization as
+      // project hashes for Unicode Windows/macOS paths, including old rows.
+      if ((process.platform === "win32" || process.platform === "darwin") && /[^\x00-\x7f]/.test(projectDir)) {
+        const paths = ["", ...this.matchingProjectPaths(projectDir)];
+        return this.db.prepare(`SELECT id, session_id, category, type, data, created_at
+          FROM session_events WHERE project_dir IN (${paths.map(() => "?").join(",")})
+          AND (data LIKE '%' || ? || '%' ESCAPE '\\' OR category LIKE '%' || ? || '%' ESCAPE '\\')
+          AND (? IS NULL OR category = ?) ORDER BY id ASC LIMIT ?`)
+          .all(...paths, escapedQuery, escapedQuery, sourceParam, sourceParam, limit) as StoredEvent[];
+      }
       return this.stmt(S.searchEvents).all(
-        projectDir,
+        canonicalProjectPath(projectDir),
         escapedQuery,
         escapedQuery,
         sourceParam,
@@ -1313,6 +1353,13 @@ export class SessionDB extends SQLiteBase {
    */
   getSessionIdsForProject(projectDir: string): string[] {
     try {
+      if ((process.platform === "win32" || process.platform === "darwin") && /[^\x00-\x7f]/.test(projectDir)) {
+        const paths = this.matchingProjectPaths(projectDir);
+        if (!paths.length) return [];
+        const rows = this.db.prepare(`SELECT DISTINCT session_id FROM session_events
+          WHERE project_dir IN (${paths.map(() => "?").join(",")})`).all(...paths) as Array<{ session_id: string }>;
+        return rows.map(r => r.session_id);
+      }
       // #827: match by canonical path shape, not raw bytes. The host adapter
       // may store `project_dir` in a different separator / trailing-slash
       // shape than the search path resolves the scope in — most visibly on
@@ -1327,18 +1374,25 @@ export class SessionDB extends SQLiteBase {
       // normalize keeps the bound parameter in the identical shape. This
       // preserves the #737 project scope — distinct directories still differ
       // after normalization, so cross-project isolation is intact.
-      const normalized = normalizeWorktreePath(projectDir);
+      const normalized = canonicalProjectPath(projectDir);
       const rows = this.db
         .prepare(
           `SELECT DISTINCT session_id
              FROM session_events
-            WHERE RTRIM(REPLACE(project_dir, '\\', '/'), '/') = ?`,
+            WHERE ${canonicalProjectPathSQL} = ?`,
         )
         .all(normalized) as Array<{ session_id: string }>;
       return rows.map((r) => r.session_id);
     } catch {
       return [];
     }
+  }
+
+  private matchingProjectPaths(projectDir: string): string[] {
+    const expected = canonicalProjectPath(projectDir);
+    const rows = this.db.prepare("SELECT DISTINCT project_dir FROM session_events WHERE project_dir <> ''")
+      .all() as Array<{ project_dir: string }>;
+    return rows.map(r => r.project_dir).filter(p => canonicalProjectPath(p) === expected);
   }
 
   // ═══════════════════════════════════════════
@@ -1415,8 +1469,8 @@ export class SessionDB extends SQLiteBase {
   }
 
   /**
-   * Read the per-session usage high-water cursor — the uuid of the last
-   * assistant turn already emitted by the Stop hook's main-turn capture.
+   * Read the opaque per-session usage checkpoint. Codex accepts historical
+   * line cursors and now writes versioned byte-offset/model state here.
    * Returns null when unset (first Stop) or the session row is absent.
    */
   getUsageCursor(sessionId: string): string | null {
@@ -1425,11 +1479,11 @@ export class SessionDB extends SQLiteBase {
   }
 
   /**
-   * Advance the per-session usage high-water cursor to `uuid`. No-op when the
-   * session_meta row does not exist yet (callers ensureSession first).
+   * Set a checkpoint for legacy callers. Native Stop uses bulkInsertEvents'
+   * cursor compare-and-swap to commit usage and checkpoint atomically.
    */
-  setUsageCursor(sessionId: string, uuid: string): void {
-    this.stmt(S.setUsageCursor).run(uuid, sessionId);
+  setUsageCursor(sessionId: string, cursor: string): void {
+    this.stmt(S.setUsageCursor).run(cursor, sessionId);
   }
 
   // ═══════════════════════════════════════════

@@ -853,7 +853,7 @@ function checkFilePathDenyPolicy(
 
 // Build description dynamically based on detected runtimes
 const langList = available.join(", ");
-const bunNote = hasBunRuntime()
+const bunNote = hasBunRuntime(runtimes)
   ? " (Bun detected — JS/TS runs 3-5x faster)"
   : "";
 
@@ -4138,7 +4138,7 @@ async function main() {
   if (process.stdin.isTTY) {
     console.error(`codex-context-mode MCP server v${VERSION} running on stdio`);
     console.error(`Detected runtimes:\n${getRuntimeSummary(runtimes)}`);
-    if (!hasBunRuntime()) {
+    if (!hasBunRuntime(runtimes)) {
       console.error(
         "\nPerformance tip: Install Bun for 3-5x faster JS/TS execution",
       );

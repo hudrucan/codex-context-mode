@@ -75,6 +75,48 @@ export interface RuntimeMap {
 
 const isWindows = process.platform === "win32";
 
+type WindowsLookup = (cmd: string) => string[];
+
+function windowsCommandPaths(cmd: string): string[] {
+  try {
+    return execSync(`where ${cmd}`, { encoding: "utf-8", stdio: "pipe" })
+      .trim().split(/\r?\n/).map(p => p.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/** One discovery snapshot per detection, never cached across PATH/environment changes. */
+function discoverWindowsCommands(): WindowsLookup {
+  const commands = ["bun", "node", "tsx", "ts-node", "python3", "python", "py",
+    "bash", "sh", "pwsh", "powershell", "ruby", "go", "rustc", "php", "perl",
+    "Rscript", "r", "elixir", "dotnet-script"];
+  const hits = new Map(commands.map(cmd => [cmd.toLowerCase(), [] as string[]]));
+  try {
+    const extensions = process.env.PATHEXT?.toLowerCase().split(";");
+    // Unknown PATHEXT syntax retains the original per-command resolution.
+    if (!extensions?.length || extensions.some(ext => !/^\.[a-z0-9]+$/.test(ext))) return windowsCommandPaths;
+    const suffixes = new Set(extensions);
+    // One wildcard enumerates each PATH directory once. Supplying many separate
+    // patterns still makes where rescan PATH for every name on Windows LTSC.
+    // Native enumeration preserves visibility, aliases and directory ordering.
+    const output = execSync("where *", { encoding: "utf-8", stdio: "pipe", maxBuffer: 4 * 1024 * 1024 });
+    for (const path of output.trim().split(/\r?\n/).map(p => p.trim()).filter(Boolean)) {
+      const base = runtimeBasename(path).toLowerCase();
+      const extension = /\.[^.]+$/.exec(base)?.[0] ?? "";
+      if (!hits.has(base) && !suffixes.has(extension)) continue;
+      const key = hits.has(base) ? base : base.slice(0, -extension.length);
+      hits.get(key)?.push(path);
+    }
+    return cmd => hits.get(cmd.toLowerCase()) ?? [];
+  } catch (err) {
+    // Exit 1 means nothing matched. Failed/oversized discovery falls back;
+    // never retain a partial snapshot as a claim that a runtime is missing.
+    if ((err as { status?: number }).status === 1) return () => [];
+    return windowsCommandPaths;
+  }
+}
+
 function commandExists(cmd: string): boolean {
   try {
     const check = isWindows ? `where ${cmd}` : `command -v ${cmd}`;
@@ -93,18 +135,13 @@ function commandExists(cmd: string): boolean {
  * pops the Store. Filter those entries out and require `<cmd> --version` to
  * exit 0 before declaring the runtime available (#455).
  */
-function runnableExists(cmd: string): boolean {
+function runnableExists(cmd: string, lookup: WindowsLookup = windowsCommandPaths): boolean {
   if (isWindows) {
     // Reject if every `where` hit lives under Microsoft\WindowsApps (Store stubs).
-    try {
-      const out = execSync(`where ${cmd}`, { encoding: "utf-8", stdio: "pipe" });
-      const hits = out.trim().split(/\r?\n/).map(p => p.trim()).filter(Boolean);
-      if (hits.length === 0) return false;
-      const realHits = hits.filter(p => !/\\Microsoft\\WindowsApps\\/i.test(p));
-      if (realHits.length === 0) return false;
-    } catch {
-      return false;
-    }
+    const hits = lookup(cmd);
+    if (hits.length === 0) return false;
+    const realHits = hits.filter(p => !/\\Microsoft\\WindowsApps\\/i.test(p));
+    if (realHits.length === 0) return false;
   } else if (!commandExists(cmd)) {
     return false;
   }
@@ -126,15 +163,15 @@ function runnableExists(cmd: string): boolean {
   }
 }
 
-function bunExists(): boolean {
-  if (commandExists("bun")) return true;
+function bunExists(exists = commandExists): boolean {
+  if (exists("bun")) return true;
   for (const p of bunFallbackPaths()) {
     if (existsSync(p)) return true;
   }
   return false;
 }
 
-function bunCommand(): string {
+function bunCommand(exists = commandExists): string {
   // Prefer absolute .exe paths so spawn() can run with shell:false on Windows.
   // `where bun` may resolve to a `bun.cmd` npm shim (#506) which CreateProcess
   // cannot execute directly — return the real .exe wherever we can find one.
@@ -144,7 +181,7 @@ function bunCommand(): string {
   // Bare name only if PATH resolution confirms it. On Windows this is
   // typically a .cmd shim — the executor's needsShell list (which now
   // includes "bun" — see #506) ensures shell:true so cmd.exe can resolve it.
-  if (commandExists("bun")) return "bun";
+  if (exists("bun")) return "bun";
   // Synthetic last-resort path for diagnostics/error messages.
   const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
   return isWindows ? `${home}\\.bun\\bin\\bun.exe` : `${home}/.bun/bin/bun`;
@@ -195,15 +232,8 @@ const KNOWN_GIT_BASH_PATHS = [
  * canonicalize it to the absolute Git\usr\bin\bash.exe path (so native git
  * keeps MSYS path conversion) by preferring a matching known path that exists.
  */
-function resolveWindowsBash(): string | null {
-  let candidates: string[];
-  try {
-    const result = execSync("where bash", { encoding: "utf-8", stdio: "pipe" });
-    candidates = result.trim().split(/\r?\n/).map(p => p.trim()).filter(Boolean);
-  } catch {
-    // bash not on PATH → genuinely unavailable. Fall through to pwsh/etc.
-    return null;
-  }
+function resolveWindowsBash(lookup: WindowsLookup = windowsCommandPaths): string | null {
+  const candidates = lookup("bash");
 
   for (const p of candidates) {
     const lower = p.toLowerCase();
@@ -220,18 +250,18 @@ function resolveWindowsBash(): string | null {
   return null;
 }
 
-function resolveWindowsShell(windowsBash: string | null = resolveWindowsBash()): string {
+function resolveWindowsShell(windowsBash: string | null = resolveWindowsBash(), exists = commandExists): string {
   // Prefer Git Bash (#826) so native git keeps its MSYS path conversion.
   // The caller passes the already-resolved windowsBash to avoid probing the
   // filesystem twice (it also feeds the cmd.exe shellOverride guard above).
   // Fall back through POSIX sh, then PowerShell Core (pwsh) for proper UTF-8
   // handling, then Windows PowerShell, then cmd.exe as the last resort.
   return windowsBash
-    ?? (commandExists("sh")
+    ?? (exists("sh")
       ? "sh"
-      : commandExists("pwsh")
+      : exists("pwsh")
         ? "pwsh"
-        : commandExists("powershell")
+        : exists("powershell")
           ? "powershell"
           : "cmd.exe");
 }
@@ -332,8 +362,10 @@ export function resolveJavascriptRuntime(
 }
 
 export function detectRuntimes(): RuntimeMap {
-  const hasBun = bunExists();
-  const bun = hasBun ? bunCommand() : null;
+  const lookup = isWindows ? discoverWindowsCommands() : windowsCommandPaths;
+  const exists = isWindows ? (cmd: string) => lookup(cmd).length > 0 : commandExists;
+  const hasBun = bunExists(exists);
+  const bun = hasBun ? bunCommand(exists) : null;
 
   // Honor SHELL env var when it points at a real binary AND the basename is
   // an allowlisted shell. Lets users with non-standard setups (custom bash,
@@ -345,7 +377,7 @@ export function detectRuntimes(): RuntimeMap {
   // could redirect the executor to /usr/bin/python or any arbitrary binary.
   const userShell = process.env.SHELL;
   const isWin = process.platform === "win32";
-  const windowsBash = isWin ? resolveWindowsBash() : null;
+  const windowsBash = isWin ? resolveWindowsBash(lookup) : null;
   const shellOverride = userShell &&
     existsSync(userShell) &&
     isAllowlistedShell(userShell) &&
@@ -358,40 +390,41 @@ export function detectRuntimes(): RuntimeMap {
     : null;
 
   return {
-    javascript: resolveJavascriptRuntime(bun),
+    javascript: resolveJavascriptRuntime(bun, { commandExists: exists }),
     typescript: bun
       ? bun
-      : commandExists("tsx")
+      : exists("tsx")
         ? "tsx"
-        : commandExists("ts-node")
+        : exists("ts-node")
           ? "ts-node"
           : null,
-    python: runnableExists("python3")
+    python: runnableExists("python3", lookup)
       ? "python3"
-      : runnableExists("python")
+      : runnableExists("python", lookup)
         ? "python"
-        : runnableExists("py")
+        : runnableExists("py", lookup)
           ? "py"
           : null,
     shell: shellOverride ?? (isWin
-      ? resolveWindowsShell(windowsBash)
+      ? resolveWindowsShell(windowsBash, exists)
       : commandExists("bash") ? "bash" : "sh"),
-    ruby: commandExists("ruby") ? "ruby" : null,
-    go: commandExists("go") ? "go" : null,
-    rust: commandExists("rustc") ? "rustc" : null,
-    php: commandExists("php") ? "php" : null,
-    perl: commandExists("perl") ? "perl" : null,
-    r: commandExists("Rscript")
+    ruby: exists("ruby") ? "ruby" : null,
+    go: exists("go") ? "go" : null,
+    rust: exists("rustc") ? "rustc" : null,
+    php: exists("php") ? "php" : null,
+    perl: exists("perl") ? "perl" : null,
+    r: exists("Rscript")
       ? "Rscript"
-      : commandExists("r")
+      : exists("r")
         ? "r"
         : null,
-    elixir: commandExists("elixir") ? "elixir" : null,
-    csharp: commandExists("dotnet-script") ? "dotnet-script" : null,
+    elixir: exists("elixir") ? "elixir" : null,
+    csharp: exists("dotnet-script") ? "dotnet-script" : null,
   };
 }
 
-export function hasBunRuntime(): boolean {
+export function hasBunRuntime(runtimes?: RuntimeMap): boolean {
+  if (runtimes) return BUN_BASENAME.test(runtimeBasename(runtimes.javascript ?? ""));
   return bunExists();
 }
 

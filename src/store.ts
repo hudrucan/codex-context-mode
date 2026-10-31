@@ -284,6 +284,7 @@ export class ContentStore {
   #stmtInsertVocab!: PreparedStatement;
 
   // Dedup path (delete previous source with same label before re-indexing)
+  #stmtSourceExists!: PreparedStatement;
   #stmtDeleteChunksByLabel!: PreparedStatement;
   #stmtDeleteChunksTrigramByLabel!: PreparedStatement;
   #stmtDeleteSourcesByLabel!: PreparedStatement;
@@ -485,6 +486,7 @@ export class ContentStore {
 
     // Dedup path: delete previous source with same label before re-indexing
     // Prevents stale outputs from accumulating in iterative workflows (build-fix-build)
+    this.#stmtSourceExists = this.#db.prepare("SELECT 1 FROM sources WHERE label = ? AND id <> ? LIMIT 1");
     this.#stmtDeleteChunksByLabel = this.#db.prepare(
       "DELETE FROM chunks WHERE source_id IN (SELECT id FROM sources WHERE label = ?)",
     );
@@ -492,7 +494,7 @@ export class ContentStore {
       "DELETE FROM chunks_trigram WHERE source_id IN (SELECT id FROM sources WHERE label = ?)",
     );
     this.#stmtDeleteSourcesByLabel = this.#db.prepare(
-      "DELETE FROM sources WHERE label = ?",
+      "DELETE FROM sources WHERE label = ? AND id <> ?",
     );
 
     // Search path (hot)
@@ -957,21 +959,24 @@ export class ContentStore {
     const sessionIdCol = attribution?.sessionId ?? "";
     const eventIdCol = attribution?.eventId ?? "";
 
-    // Atomic dedup + insert: delete previous source with same label,
-    // then insert new content — all within a single transaction.
+    // Atomic replacement: create the source, remove predecessors with the same
+    // label, then insert its chunks — all within a single transaction.
     // Prevents stale results in iterative workflows. (See: GitHub issue #67)
     const transaction = this.#db.transaction(() => {
-      this.#stmtDeleteChunksByLabel.run(label);
-      this.#stmtDeleteChunksTrigramByLabel.run(label);
-      this.#stmtDeleteSourcesByLabel.run(label);
-
-      if (chunks.length === 0) {
-        const info = this.#stmtInsertSourceEmpty.run(label, filePath ?? null, contentHash ?? null);
-        return Number(info.lastInsertRowid);
-      }
-
-      const info = this.#stmtInsertSource.run(label, chunks.length, codeChunks, filePath ?? null, contentHash ?? null);
+      // Write first, retaining SQLite's writer serialization before the lookup.
+      // Reading first would introduce a deferred-transaction upgrade race.
+      const info = chunks.length === 0
+        ? this.#stmtInsertSourceEmpty.run(label, filePath ?? null, contentHash ?? null)
+        : this.#stmtInsertSource.run(label, chunks.length, codeChunks, filePath ?? null, contentHash ?? null);
       const sourceId = Number(info.lastInsertRowid);
+      // source_id is UNINDEXED in FTS5: even an absent label otherwise scans
+      // both full content tables. Check the indexed label inside this same
+      // transaction, so a concurrent replacement cannot escape deduplication.
+      if (this.#stmtSourceExists.get(label, sourceId)) {
+        this.#stmtDeleteChunksByLabel.run(label);
+        this.#stmtDeleteChunksTrigramByLabel.run(label);
+        this.#stmtDeleteSourcesByLabel.run(label, sourceId);
+      }
 
       const now = new Date().toISOString();
       for (const chunk of chunks) {
@@ -1579,13 +1584,29 @@ export class ContentStore {
       }
 
       // Split oversized chunk at paragraph boundaries (double newlines)
-      const paragraphs = joined.split(/\n\n+/);
+      // Blank lines inside fences are code, not paragraph boundaries. Keep
+      // their original CRLF/LF bytes when splitting oversized sections.
+      const paragraphs: string[] = [];
+      let paragraph: string[] = [];
+      let fence = "";
+      for (const rawLine of joined.split("\n")) {
+        const structural = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+        const marker = structural.match(/^(`{3,})/);
+        if (!fence && marker) fence = marker[1];
+        else if (fence && structural.trim() === fence) fence = "";
+        paragraph.push(rawLine);
+        if (!fence && structural.trim() === "") {
+          paragraphs.push(paragraph.join("\n"));
+          paragraph = [];
+        }
+      }
+      if (paragraph.length > 0) paragraphs.push(paragraph.join("\n"));
       let accumulator: string[] = [];
       let partIndex = 1;
 
       const flushAccumulator = () => {
         if (accumulator.length === 0) return;
-        const part = accumulator.join("\n\n").trim();
+        const part = accumulator.join("\n").trim();
         if (part.length === 0) return;
         const partTitle = paragraphs.length > 1 ? `${title} (${partIndex})` : title;
         partIndex++;
@@ -1599,7 +1620,7 @@ export class ContentStore {
 
       for (const para of paragraphs) {
         accumulator.push(para);
-        const candidate = accumulator.join("\n\n");
+        const candidate = accumulator.join("\n");
         if (Buffer.byteLength(candidate) > maxChunkBytes && accumulator.length > 1) {
           accumulator.pop();
           flushAccumulator();
@@ -1613,7 +1634,8 @@ export class ContentStore {
 
     let i = 0;
     while (i < lines.length) {
-      const line = lines[i];
+      const rawLine = lines[i];
+      const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
 
       // Horizontal rule separator (Context7 uses long dashes)
       if (/^[-_*]{3,}\s*$/.test(line)) {
@@ -1640,7 +1662,7 @@ export class ContentStore {
         headingStack.push({ level, text: heading });
         currentHeading = heading;
 
-        currentContent.push(line);
+        currentContent.push(rawLine);
         i++;
         continue;
       }
@@ -1649,7 +1671,7 @@ export class ContentStore {
       const codeMatch = line.match(/^(`{3,})(.*)?$/);
       if (codeMatch) {
         const fence = codeMatch[1];
-        const codeLines: string[] = [line];
+        const codeLines: string[] = [rawLine];
         i++;
 
         while (i < lines.length) {
@@ -1666,7 +1688,7 @@ export class ContentStore {
       }
 
       // Regular line
-      currentContent.push(line);
+      currentContent.push(rawLine);
       i++;
     }
 

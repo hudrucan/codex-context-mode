@@ -2129,6 +2129,15 @@ const TOOL_NAME_NORMALIZE: Record<string, string> = {
 
 function normalizeHookInput(input: HookInput): HookInput {
   const normalized = TOOL_NAME_NORMALIZE[input.tool_name];
+  if (input.tool_name === "exec_command" &&
+      typeof input.tool_input.command !== "string" &&
+      typeof input.tool_input.cmd === "string") {
+    return {
+      ...input,
+      tool_name: normalized,
+      tool_input: { ...input.tool_input, command: input.tool_input.cmd },
+    };
+  }
   if (!normalized || normalized === input.tool_name) return input;
   return { ...input, tool_name: normalized };
 }
