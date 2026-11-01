@@ -30,3 +30,4 @@ tools/pricing/litellm-catalog.json
 /.kilo/
 !hooks/codex-usage.bundle.mjs
 /dist/
+/reports/
